@@ -1,0 +1,42 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - smartdesk
+    # Internal only — not published to the host.
+
+  ai-service:
+    build: ./ai-service
+    restart: unless-stopped
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+    networks:
+      - smartdesk
+    # Internal only — reachable from api-service at http://ai-service:8000.
+
+  api-service:
+    build: ./api-service
+    restart: unless-stopped
+    depends_on:
+      - mongo
+      - ai-service
+    environment:
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DB: smartdesk
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-prod}
+      AI_SERVICE_URL: http://ai-service:8000
+    ports:
+      - "8080:8080"   # The only service exposed to clients.
+    networks:
+      - smartdesk
+
+networks:
+  smartdesk:
+    driver: bridge
+
+volumes:
+  mongo_data:
