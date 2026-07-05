@@ -1,0 +1,14 @@
+# Shared lint config for all services (ruff discovers this from the repo root).
+line-length = 100
+target-version = "py311"
+
+[lint]
+# E/W: pycodestyle, F: pyflakes, I: import order, B: bugbear, UP: pyupgrade
+select = ["E", "F", "W", "I", "B", "UP"]
+# B008 flags calls in argument defaults, but `Depends(...)` in defaults is
+# exactly how FastAPI dependency injection is designed to be used.
+ignore = ["B008"]
+
+[lint.isort]
+# Match the existing style: stdlib, third-party, then first-party "app".
+known-first-party = ["app"]

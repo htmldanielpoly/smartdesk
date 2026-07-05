@@ -12,11 +12,29 @@ services:
     build: ./ai-service
     restart: unless-stopped
     environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      LOCAL_AI_ENABLED: ${LOCAL_AI_ENABLED:-true}
+      MODELS_DIR: /models
+      AUTO_DOWNLOAD_MODELS: ${AUTO_DOWNLOAD_MODELS:-true}
+    volumes:
+      # Model files (~450 MB) are downloaded on first start and persist here,
+      # so container rebuilds never re-download them.
+      - ai_models:/models
     networks:
       - smartdesk
     # Internal only — reachable from api-service at http://ai-service:8000.
+
+  forum-service:
+    build: ./forum-service
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    environment:
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DB: smartdesk_forum
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-prod}   # must match api-service
+    networks:
+      - smartdesk
+    # Internal only — reachable from api-service at http://forum-service:8001.
 
   api-service:
     build: ./api-service
@@ -24,11 +42,15 @@ services:
     depends_on:
       - mongo
       - ai-service
+      - forum-service
     environment:
       MONGO_URI: mongodb://mongo:27017
       MONGO_DB: smartdesk
       JWT_SECRET: ${JWT_SECRET:-change-me-in-prod}
       AI_SERVICE_URL: http://ai-service:8000
+      FORUM_SERVICE_URL: http://forum-service:8001
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     ports:
       - "8080:8080"   # The only service exposed to clients.
     networks:
@@ -40,3 +62,4 @@ networks:
 
 volumes:
   mongo_data:
+  ai_models:
