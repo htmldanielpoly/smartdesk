@@ -11,7 +11,9 @@ class ClassifyResponse(BaseModel):
     priority: str
     department: str
     confidence: float
-    source: str  # "ai" | "fallback"
+    source: str  # "local" | "fallback"
+    # Guardrail annotations, e.g. ["injection_suspected"].
+    flags: list[str] = Field(default_factory=list)
 
 
 class CopilotRequest(BaseModel):
@@ -23,7 +25,10 @@ class CopilotRequest(BaseModel):
 class CopilotResponse(BaseModel):
     suggested_solution: str
     draft_response: str
-    source: str
+    source: str  # "local" | "fallback"
+    # KB article ids the answer is grounded in (empty for template fallbacks).
+    citations: list[str] = Field(default_factory=list)
+    flags: list[str] = Field(default_factory=list)
 
 
 class DuplicateInput(BaseModel):
@@ -46,4 +51,4 @@ class DuplicateCandidate(BaseModel):
 
 class DuplicatesResponse(BaseModel):
     candidates: list[DuplicateCandidate]
-    source: str
+    source: str  # "local" | "fallback"

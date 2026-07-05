@@ -1,12 +1,12 @@
-"""Duplicate detection: OpenAI embeddings + cosine similarity, with a
-token-overlap (Jaccard) fallback when embeddings are unavailable."""
+"""Duplicate detection: local embeddings + cosine similarity, with a
+token-overlap (Jaccard) fallback when the embedding model is unavailable."""
 import re
 
 import numpy as np
 
 from app.config import settings
 from app.schemas import DuplicateCandidate, DuplicatesRequest, DuplicatesResponse
-from app.services import openai_client
+from app.services import llm_local
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
@@ -26,7 +26,9 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / denom) if denom else 0.0
 
 
-def _rank(scored: list[tuple[str, str, float]], source: str, threshold: float) -> DuplicatesResponse:
+def _rank(
+    scored: list[tuple[str, str, float]], source: str, threshold: float
+) -> DuplicatesResponse:
     keep = [
         DuplicateCandidate(ticket_id=tid, title=title, similarity=round(score, 3))
         for tid, title, score in scored
@@ -43,19 +45,19 @@ def find(req: DuplicatesRequest) -> DuplicatesResponse:
     query_text = f"{req.title}. {req.description}"
     cand_texts = [f"{c.title}. {c.description}" for c in req.candidates]
 
-    embeddings = openai_client.embed([query_text, *cand_texts])
+    embeddings = llm_local.embed([query_text, *cand_texts])
     if embeddings is not None:
-        q = np.array(embeddings[0])
+        q = np.asarray(embeddings[0], dtype=np.float32)
         scored = [
-            (c.ticket_id, c.title, _cosine(q, np.array(emb)))
-            for c, emb in zip(req.candidates, embeddings[1:])
+            (c.ticket_id, c.title, _cosine(q, np.asarray(emb, dtype=np.float32)))
+            for c, emb in zip(req.candidates, embeddings[1:], strict=False)
         ]
-        return _rank(scored, "ai", settings.duplicate_similarity_threshold)
+        return _rank(scored, "local", settings.duplicate_similarity_threshold)
 
     # Fallback: lexical token overlap.
     q_tokens = _tokens(query_text)
     scored = [
         (c.ticket_id, c.title, _jaccard(q_tokens, _tokens(text)))
-        for c, text in zip(req.candidates, cand_texts)
+        for c, text in zip(req.candidates, cand_texts, strict=False)
     ]
     return _rank(scored, "fallback", settings.duplicate_fallback_threshold)

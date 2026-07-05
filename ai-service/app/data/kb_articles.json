@@ -1,0 +1,80 @@
+[
+  {
+    "id": "KB-ACC-001",
+    "category": "Account",
+    "title": "Resetting a forgotten password",
+    "body": "Use the 'Forgot password' link on the sign-in page. A reset link is emailed and is valid for 30 minutes. If the email does not arrive, check the spam folder and confirm the address on file. Agents can trigger a manual reset from the admin console (Users > Reset password); the user must then set a new password on first sign-in."
+  },
+  {
+    "id": "KB-ACC-002",
+    "category": "Account",
+    "title": "Account locked after failed sign-in attempts",
+    "body": "Accounts lock automatically for 15 minutes after 5 failed sign-in attempts. The lock clears on its own; there is no need to reset the password. If the user did not attempt these sign-ins, treat it as a possible credential-stuffing attempt: advise a password change and enable two-factor authentication."
+  },
+  {
+    "id": "KB-ACC-003",
+    "category": "Account",
+    "title": "Two-factor authentication (2FA) problems",
+    "body": "If the authenticator codes are rejected, first check the device clock — TOTP requires accurate time; enable automatic time sync. If the device with the authenticator was lost, verify the user's identity per policy and then clear 2FA enrollment from the admin console so they can re-enroll."
+  },
+  {
+    "id": "KB-BIL-001",
+    "category": "Billing",
+    "title": "Requesting an invoice copy or correction",
+    "body": "Invoice copies can be downloaded from Billing > Invoices for the last 24 months. For corrections (wrong company name, VAT number, address), open a correction request; a corrected invoice is issued within 3 business days and the original is voided. Amounts cannot be changed retroactively — a credit note plus a new invoice is issued instead."
+  },
+  {
+    "id": "KB-BIL-002",
+    "category": "Billing",
+    "title": "Refund policy and processing time",
+    "body": "Refunds are available within 14 days of the charge for annual plans and 48 hours for monthly renewals. Approved refunds are returned to the original payment method within 5-10 business days. Partial refunds are prorated by unused days. Agents must record the refund reason code on the ticket before approving."
+  },
+  {
+    "id": "KB-BIL-003",
+    "category": "Billing",
+    "title": "Payment failed or card declined",
+    "body": "Ask the customer to verify the card number, expiry and billing address, and that the card allows online/international charges. Retry from Billing > Payment methods. After three failed attempts the subscription enters a 7-day grace period before suspension. Bank transfers are available for annual invoices over $500."
+  },
+  {
+    "id": "KB-TEC-001",
+    "category": "Technical",
+    "title": "Application shows a 500 error",
+    "body": "A 500 response is a server-side fault. Collect the timestamp, the request ID shown on the error page, and the action attempted. Check the service status page first; if there is no incident, escalate to Engineering with the request ID. Do not ask the customer to clear caches for 500 errors — it is not a client-side issue."
+  },
+  {
+    "id": "KB-TEC-002",
+    "category": "Technical",
+    "title": "Application crashes or freezes on startup",
+    "body": "First have the user update to the latest version and restart the machine. If the crash persists, ask for the crash log (Help > Export diagnostics) and attach it to the ticket. Known conflict: outdated GPU drivers cause a freeze on the splash screen — updating the graphics driver resolves it."
+  },
+  {
+    "id": "KB-NET-001",
+    "category": "Network",
+    "title": "VPN will not connect",
+    "body": "Check in order: (1) internet works without VPN, (2) credentials are current — VPN passwords expire every 90 days, (3) the VPN client is version 4.2 or later, (4) the user is not on a network that blocks UDP 443 (hotel/campus networks often do — switch the client to TCP mode). If all four pass, collect the client log and escalate to Infrastructure."
+  },
+  {
+    "id": "KB-NET-002",
+    "category": "Network",
+    "title": "Slow or dropping Wi-Fi in the office",
+    "body": "Ask the user to compare wired vs wireless speed first. Office access points are rebooted nightly at 03:00; issues right after that window self-resolve in minutes. For a specific desk/room, record the room number and nearest AP label so Infrastructure can check coverage. 2.4 GHz congestion: prefer the 5 GHz SSID."
+  },
+  {
+    "id": "KB-HRD-001",
+    "category": "Hardware",
+    "title": "Printer not printing or stuck in queue",
+    "body": "Clear the local print queue, power-cycle the printer, and verify it shows Ready on the display. If jobs still stall, remove and re-add the printer (drivers reinstall automatically from the print server). Hardware faults (paper jams that recur, error codes on the display) go to IT Support with the printer's asset tag."
+  },
+  {
+    "id": "KB-HRD-002",
+    "category": "Hardware",
+    "title": "Laptop battery drains fast or will not charge",
+    "body": "Check battery health in the OS power report; below 60% capacity qualifies for replacement under warranty. Verify the charger is the original wattage — underpowered USB-C chargers charge slowly or not at all under load. For replacement, open a hardware request with the laptop's asset tag and the power report attached."
+  },
+  {
+    "id": "KB-GEN-001",
+    "category": "Other",
+    "title": "How to escalate a ticket and response-time targets",
+    "body": "Response targets by priority: URGENT 4 hours, HIGH 1 business day, MEDIUM 3 business days, LOW 7 business days. A ticket may be escalated by the assigned agent when it is blocked on another team for more than one target window. Escalation adds the department lead as a watcher; it does not change ownership."
+  }
+]
