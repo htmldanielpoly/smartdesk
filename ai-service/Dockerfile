@@ -20,7 +20,11 @@ WORKDIR /app
 
 COPY requirements.txt .
 COPY --from=builder /wheels /wheels
-RUN pip install --no-cache-dir -r requirements.txt /wheels/*.whl \
+# Install pinned requirements first, then llama-cpp-python from the local
+# wheel house only (its transitive deps resolve against what is already
+# installed instead of dragging in newer duplicates, e.g. a second numpy).
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir --no-index --find-links=/wheels llama-cpp-python \
     && rm -rf /wheels
 
 COPY app ./app
