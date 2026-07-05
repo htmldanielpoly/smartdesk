@@ -37,8 +37,14 @@ def test_create_ticket_works_when_ai_unavailable(client):
     assert r.status_code == 201
     body = r.json()
     assert body["status"] == "OPEN"
-    # Core ticketing succeeds even though AI classification was unavailable.
-    assert body["ai_suggested"]["status"] == "unavailable"
+    # Classification is asynchronous: the response never waits for the AI.
+    assert body["ai_suggested"]["status"] == "pending"
+
+    # The background task has run by now (TestClient executes background
+    # tasks before returning) and recorded that the AI was unavailable —
+    # core ticketing succeeded anyway.
+    r2 = client.get(f"/api/tickets/{body['id']}", headers=auth_header(token))
+    assert r2.json()["ai_suggested"]["status"] == "unavailable"
 
 
 def test_user_cannot_view_others_ticket(client):

@@ -1,7 +1,7 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from app.database import get_db
 from app.deps import get_current_user, require_roles
@@ -33,13 +33,28 @@ def _can_view(ticket: dict, user: dict) -> bool:
     return ticket["createdBy"] == user["_id"]
 
 
+async def _classify_in_background(ticket_id: ObjectId, title: str, description: str) -> None:
+    """Best-effort AI classification, run after the response is sent.
+
+    Local LLM inference can take tens of seconds on CPU; the client gets its
+    ticket immediately with aiSuggested.status == "pending" and the suggestion
+    lands on the document when ready ("ok") or not ("unavailable").
+    """
+    ai = await ai_client.classify(title, description)
+    suggestion = {**ai, "status": "ok"} if ai else {"status": "unavailable"}
+    await get_db().tickets.update_one(
+        {"_id": ticket_id}, {"$set": {"aiSuggested": suggestion}}
+    )
+
+
 @router.post("", response_model=TicketOut, status_code=status.HTTP_201_CREATED)
 async def create_ticket(
     payload: TicketCreate,
+    background_tasks: BackgroundTasks,
     user: dict = Depends(get_current_user),
     _: None = Depends(rate_limit),
 ):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     doc = {
         "title": payload.title,
         "description": payload.description,
@@ -56,17 +71,10 @@ async def create_ticket(
     result = await get_db().tickets.insert_one(doc)
     doc["_id"] = result.inserted_id
 
-    # Best-effort AI classification. Never blocks ticket creation success.
-    ai = await ai_client.classify(payload.title, payload.description)
-    suggestion = (
-        {**ai, "status": "ok"}
-        if ai
-        else {"status": "unavailable"}
+    # Never block ticket creation on AI availability or speed.
+    background_tasks.add_task(
+        _classify_in_background, result.inserted_id, payload.title, payload.description
     )
-    await get_db().tickets.update_one(
-        {"_id": result.inserted_id}, {"$set": {"aiSuggested": suggestion}}
-    )
-    doc["aiSuggested"] = suggestion
 
     await activity.log(result.inserted_id, user["_id"], "ticket_created")
     return serialize_ticket(doc)
@@ -136,7 +144,7 @@ async def update_ticket(
         )
 
     if updates:
-        updates["updatedAt"] = datetime.now(timezone.utc)
+        updates["updatedAt"] = datetime.now(UTC)
         await get_db().tickets.update_one({"_id": ticket["_id"]}, {"$set": updates})
 
     return serialize_ticket(await _get_ticket_or_404(ticket_id))
@@ -154,11 +162,13 @@ async def assign_ticket(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid agent id")
     agent = await get_db().users.find_one({"_id": ObjectId(payload.agent_id)})
     if agent is None or agent["role"] not in (Role.AGENT.value, Role.ADMIN.value):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Target is not an agent")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Target is not an agent"
+        )
 
     await get_db().tickets.update_one(
         {"_id": ticket["_id"]},
-        {"$set": {"assignedAgent": agent["_id"], "updatedAt": datetime.now(timezone.utc)}},
+        {"$set": {"assignedAgent": agent["_id"], "updatedAt": datetime.now(UTC)}},
     )
     await activity.log(ticket["_id"], user["_id"], "assigned", agent=str(agent["_id"]))
     return serialize_ticket(await _get_ticket_or_404(ticket_id))
