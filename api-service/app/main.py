@@ -3,22 +3,26 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.database import connect, disconnect
-from app.routers import admin, ai, auth, comments, tickets
+from app.routers import admin, ai, auth, comments, forums, queue, tickets
+from app.services.bootstrap import ensure_admin
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect()
+    await ensure_admin()
     yield
     await disconnect()
 
 
-app = FastAPI(title="SmartDesk API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="SmartDesk API", version="0.2.0", lifespan=lifespan)
 
 app.include_router(auth.router)
 app.include_router(tickets.router)
 app.include_router(comments.router)
 app.include_router(ai.router)
+app.include_router(queue.router)
+app.include_router(forums.router)
 app.include_router(admin.router)
 
 

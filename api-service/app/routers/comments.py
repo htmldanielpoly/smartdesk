@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -58,7 +58,7 @@ async def add_comment(
         "authorId": user["_id"],
         "body": payload.body,
         "internal": internal,
-        "createdAt": datetime.now(timezone.utc),
+        "createdAt": datetime.now(UTC),
     }
     result = await get_db().comments.insert_one(doc)
     doc["_id"] = result.inserted_id

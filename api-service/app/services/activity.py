@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from bson import ObjectId
 
@@ -13,6 +13,6 @@ async def log(ticket_id: ObjectId, actor_id: ObjectId, action: str, **details) -
             "actorId": actor_id,
             "action": action,
             "details": details,
-            "timestamp": datetime.now(timezone.utc),
+            "timestamp": datetime.now(UTC),
         }
     )

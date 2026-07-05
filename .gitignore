@@ -19,6 +19,10 @@ env/
 *.env
 !*.env.example
 
+# Local AI model files (downloaded at startup, never committed)
+models/
+*.gguf
+
 # IDE / OS
 .idea/
 .vscode/

@@ -1,0 +1,5 @@
+# Local-LLM runtime, installed in the Docker image (it compiles llama.cpp,
+# which needs a C++ toolchain — see the Dockerfile's builder stage).
+# The service runs fine without it: all AI features degrade to rule-based
+# fallbacks, which is also how the unit tests run.
+llama-cpp-python==0.3.32

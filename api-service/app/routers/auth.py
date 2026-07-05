@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pymongo.errors import DuplicateKeyError
@@ -20,7 +20,7 @@ async def register(payload: RegisterRequest, _: None = Depends(rate_limit)):
         "displayName": payload.display_name,
         "role": Role.USER.value,
         "department": None,
-        "createdAt": datetime.now(timezone.utc),
+        "createdAt": datetime.now(UTC),
     }
     try:
         result = await get_db().users.insert_one(doc)
@@ -28,7 +28,7 @@ async def register(payload: RegisterRequest, _: None = Depends(rate_limit)):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Email already registered",
-        )
+        ) from None
 
     token = create_access_token(str(result.inserted_id), Role.USER.value)
     return TokenResponse(access_token=token, role=Role.USER)
