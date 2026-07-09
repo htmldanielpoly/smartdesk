@@ -144,6 +144,14 @@ def main():
     check("copilot returns a draft", status_code == 200 and draft["draft_response"], draft)
     print(f"     -> copilot source={draft.get('source')}")
 
+    # --- incident overview (staff-only; clustering via the local model) ---
+    status_code, overview = call("GET", "/api/incidents", token=agent_tok)
+    check("agent sees incident overview",
+          status_code == 200 and "source" in overview and "incidents" in overview, overview)
+    print(f"     -> incident clustering source={overview.get('source')}")
+    status_code, denied_inc = call("GET", "/api/incidents", token=user_tok)
+    check("user cannot see incident overview", status_code == 403, denied_inc)
+
     # --- comments + status flow ---
     status_code, _ = call("POST", f"/api/tickets/{ticket_id}/comments", token=agent_tok,
                           body={"body": "We are on it."})

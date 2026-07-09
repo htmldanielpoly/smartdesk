@@ -41,3 +41,13 @@ async def duplicates(title: str, description: str, candidates: list[dict]) -> di
         "/duplicates",
         {"title": title, "description": description, "candidates": candidates},
     )
+
+
+async def cluster(items: list[dict]) -> dict | None:
+    """Group a batch of tickets into incidents via the local embedding model.
+
+    ``items`` is a list of {id, title, description}. Returns {groups, source}
+    or None if the AI service is unavailable (caller falls back to lexical
+    clustering).
+    """
+    return await _post("/cluster", {"items": items})

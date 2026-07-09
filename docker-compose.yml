@@ -51,6 +51,9 @@ services:
       FORUM_SERVICE_URL: http://forum-service:8001
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # Per-IP request cap. Raise it when seeding the grid demo or load testing
+      # (many requests from one host); default is fine for normal use.
+      RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-30}
     ports:
       - "8080:8080"   # The only service exposed to clients.
     networks:

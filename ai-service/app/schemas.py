@@ -52,3 +52,19 @@ class DuplicateCandidate(BaseModel):
 class DuplicatesResponse(BaseModel):
     candidates: list[DuplicateCandidate]
     source: str  # "local" | "fallback"
+
+
+class ClusterItem(BaseModel):
+    id: str
+    title: str
+    description: str
+
+
+class ClusterRequest(BaseModel):
+    items: list[ClusterItem] = Field(default_factory=list)
+
+
+class ClusterResponse(BaseModel):
+    # Each group is a list of item ids that form one incident/cluster.
+    groups: list[list[str]] = Field(default_factory=list)
+    source: str  # "local" | "fallback"

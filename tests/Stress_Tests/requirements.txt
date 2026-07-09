@@ -1,0 +1,3 @@
+# Load / stress testing ("swarming") — install separately, not needed for unit
+# and integration tests.
+locust==2.32.4
