@@ -44,12 +44,19 @@ jobs:
     needs: lint-test
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Build and start the full stack
         run: |
           cp .env.example .env
           LOCAL_AI_ENABLED=false docker compose up -d --build
       - name: End-to-end smoke test (through the public gateway)
         run: python scripts/smoke_test.py http://localhost:8080
+      - name: Cross-service taxonomy suite (security + live system tests)
+        run: |
+          pip install -r api-service/requirements-dev.txt
+          pytest tests/ -v
       - name: Dump logs on failure
         if: failure()
         run: docker compose logs
