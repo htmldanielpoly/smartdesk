@@ -119,20 +119,39 @@ secret, no cross-service user lookup).
 ## Quick start (Docker)
 
 ```bash
-cp .env.example .env        # defaults work out of the box
-docker compose up --build
+cp .env.example .env        # sensible defaults: admin login, local AI on, rate limit raised
+docker compose up --build -d
 ```
 
-Then open **http://localhost:8080/** for the SmartDesk web app, or
-http://localhost:8080/docs for the interactive API (Swagger UI).
-First start downloads ~450 MB of model files in the background; AI answers
-use rule-based fallbacks until the models are ready (watch
-`docker compose logs -f ai-service`). Set `LOCAL_AI_ENABLED=false` in `.env`
-to skip local AI entirely.
+First start downloads ~450 MB of model files into a Docker volume — watch
+`docker compose logs -f ai-service` until they're ready. Until then (and
+whenever anything fails) AI features degrade to rule-based fallbacks, so the app
+is usable immediately. Check the gateway is up with
+`curl http://localhost:8080/health`.
 
-A bootstrap admin is created on first start from `ADMIN_EMAIL`/`ADMIN_PASSWORD`
-in `.env` (self-registration only creates regular users; the admin promotes
-agents).
+Then open the app and the API docs:
+
+- **Web app** — http://localhost:8080/
+- **API / Swagger UI** — http://localhost:8080/docs
+
+**Sign in as the admin.** On the app's *Sign in* form use `ADMIN_EMAIL` /
+`ADMIN_PASSWORD` from `.env` (defaults `admin@example.com` /
+`change-me-please-1`). A bootstrap admin is created on first start;
+self-registration only ever creates regular users, and the admin promotes
+agents. Only staff (agent/admin) see the **Queue** and **Incidents** tabs.
+
+### Live demo: two simultaneous grid incidents
+
+Signed in as staff, open **Incidents → ⚡ Load Grid Incidents Demo**. This seeds
+50 realistic complaints spanning two outages; SmartDesk clusters them into two
+incidents using the local embedding model (the on-screen badge says whether the
+model or the lexical fallback did the clustering), prioritizes each and shows a
+manager overview. Give the AI a minute to classify the tickets, then hit
+**↻ Refresh** for the severities to fill in. Reset between runs with
+`docker compose down -v`.
+
+To skip local AI entirely and run on rule-based fallbacks only, set
+`LOCAL_AI_ENABLED=false` in `.env` before starting.
 
 ### End-to-end smoke test
 
