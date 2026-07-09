@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     duplicate_fallback_threshold: float = 0.3
     duplicate_max_results: int = 5
 
+    # --- Incident clustering thresholds ---
+    # Cosine similarity (embedding path) above which two tickets belong to the
+    # same incident. Looser than duplicate detection: an incident groups related
+    # reports, not just near-identical ones.
+    cluster_similarity_threshold: float = 0.45
+    # Token-overlap (Jaccard) threshold for the offline lexical fallback.
+    cluster_fallback_threshold: float = 0.12
+
     # --- Guardrail limits on inputs handed to the LLM ---
     max_title_chars: int = 200
     max_description_chars: int = 4000
