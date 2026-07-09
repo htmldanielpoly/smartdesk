@@ -25,6 +25,32 @@ client ──> api-service (auth, tickets, comments, queue, admin)
               └──> mongo          (smartdesk + smartdesk_forum databases)
 ```
 
+## Web UI
+
+A lightweight, Freshdesk-style single-page app ships with the gateway and is
+served from its root (`http://localhost:8080/`) — no separate frontend server,
+no build step. It's plain HTML/CSS/JS (`api-service/app/static/`) that talks to
+the same `/api/*` gateway, so the whole product runs on one exposed port.
+
+- **Customers** register/sign in, open tickets (AI auto-classifies them),
+  track status, chat with agents, and use the community forums.
+- **Agents** work the SLA-scored queue, claim the next ticket, set
+  classification and status, use the AI copilot (draft reply / find
+  duplicates), and moderate forums.
+- **Admins** additionally manage user roles.
+
+The staff-only **Incidents** view groups active complaints into incidents using
+the **local embedding model** (`ai-service` `POST /cluster`, cosine similarity
+over MiniLM embeddings; lexical token-overlap fallback when the model is off)
+and shows a manager overview — severity, affected-customer estimate and a
+recommended action per incident, with the source (model vs. fallback) shown on
+screen. Its **⚡ Load Grid Incidents Demo** button seeds 50 realistic complaints
+spanning two simultaneous grid outages — a one-click, fully model-driven live
+demo (raise `RATE_LIMIT_REQUESTS` first; see `demo/`).
+
+The UI adapts to the signed-in role and keeps you logged in across refreshes
+(JWT in `localStorage`).
+
 ## Local AI — no API keys
 
 The AI service runs two small open-weights models in-process via
@@ -97,7 +123,8 @@ cp .env.example .env        # defaults work out of the box
 docker compose up --build
 ```
 
-Then open http://localhost:8080/docs for the interactive API (Swagger UI).
+Then open **http://localhost:8080/** for the SmartDesk web app, or
+http://localhost:8080/docs for the interactive API (Swagger UI).
 First start downloads ~450 MB of model files in the background; AI answers
 use rule-based fallbacks until the models are ready (watch
 `docker compose logs -f ai-service`). Set `LOCAL_AI_ENABLED=false` in `.env`
@@ -148,6 +175,30 @@ against an in-memory MongoDB (`mongomock-motor`) and the AI tests mock the
 model, exercising the guardrails and fallback paths. Lint with `ruff check .`
 (config in `ruff.toml`).
 
+### Test taxonomy (Unit / Integration / System / Stress / Security)
+
+The `tests/` folder at the repo root organizes testing by the standard
+taxonomy and maps each type to concrete tests — see
+[`tests/README.md`](tests/README.md). Fast unit/integration tests live next to
+each service; the cross-service suite adds:
+
+```bash
+pytest tests/                              # Security (RBAC, auth-bypass, injection)
+                                           #  + System (end-to-end, skips if no stack)
+```
+
+**Stress / load testing ("swarming")** uses **Locust** — a swarm of scripted
+users measuring throughput, latency and error rate
+([`tests/Stress_Tests/`](tests/Stress_Tests)):
+
+```bash
+docker compose up -d
+pip install -r tests/Stress_Tests/requirements.txt
+locust -f tests/Stress_Tests/locustfile.py --host http://localhost:8080
+```
+
+(Apache Bench and the race-condition concurrency test are covered there too.)
+
 ## CI/CD
 
 GitHub Actions (`.github/workflows/ci.yml`):
@@ -167,6 +218,7 @@ GitHub Actions (`.github/workflows/ci.yml`):
 | Comments | `GET/POST /api/tickets/{id}/comments` |
 | AI | `POST /api/tickets/{id}/ai/copilot`, `GET /api/tickets/{id}/ai/duplicates` |
 | Queue | `GET /api/queue`, `GET /api/queue/stats`, `POST /api/queue/claim` |
+| Incidents | `GET /api/incidents` (staff: complaints clustered into incidents by the local model) |
 | Forums | `GET /api/forums/boards`, `GET/POST /api/forums/boards/{slug}/threads`, `GET /api/forums/threads/{id}`, `POST /api/forums/threads/{id}/posts`, `PATCH /api/forums/threads/{id}`, `DELETE /api/forums/posts/{id}` |
 | Admin | `GET /api/admin/users`, `PATCH /api/admin/users/{id}/role` |
 
@@ -182,8 +234,11 @@ smartdesk/
 ├── ruff.toml                  shared lint config
 ├── scripts/smoke_test.py      end-to-end test (stdlib only, used by CI)
 ├── .github/workflows/ci.yml   lint+test / docker smoke / publish to GHCR
+├── tests/                     cross-service tests by taxonomy (see tests/README)
+│   └── {Security,System,Stress}_Tests   RBAC/injection · e2e · Locust swarm
 ├── api-service/               public gateway: auth, tickets, comments, queue,
-│   └── app/{routers,services,schemas,models}        forum proxy, admin
+│   ├── app/{routers,services,schemas,models}        forum proxy, admin
+│   └── app/static/            the Freshdesk-style web UI (served at /)
 ├── ai-service/                local LLM: classify, copilot (KB-grounded),
 │   └── app/{routers,services,data}                  duplicates, guardrails
 └── forum-service/             per-department boards, threads, posts

@@ -1,0 +1,51 @@
+{
+  "generated_at": "2026-07-09T15:09:35.571857+00:00",
+  "totals": {
+    "complaints": 50,
+    "clustered": 41,
+    "unclustered": 9,
+    "incidents": 2,
+    "clustering_accuracy": 0.98,
+    "customers_affected_est": 4060
+  },
+  "incidents": {
+    "A": {
+      "key": "A",
+      "name": "Downtown Substation Fault",
+      "city": "Westbrook",
+      "area": "Downtown / Mill District",
+      "cause": "Substation transformer failure",
+      "severity": "URGENT",
+      "report_count": 25,
+      "first_report": "2026-07-09T14:02:00+00:00",
+      "customers_affected_est": 3500,
+      "sample": [
+        "Total power outage across downtown Westbrook, no electricity since 2pm",
+        "Power completely out in Westbrook downtown, whole street is dark",
+        "No power at all in Westbrook, heard a loud bang from the substation"
+      ]
+    },
+    "B": {
+      "key": "B",
+      "name": "Storm \u2014 Downed Lines",
+      "city": "Riverton",
+      "area": "Riverton \u2014 Elm & Riverside",
+      "cause": "Storm damage to distribution lines",
+      "severity": "HIGH",
+      "report_count": 16,
+      "first_report": "2026-07-09T14:02:37+00:00",
+      "customers_affected_est": 560,
+      "sample": [
+        "Storm brought a tree down on the power line on Elm Ave Riverton, lights flickering",
+        "Lights keep flickering in Riverton after the storm, voltage seems low",
+        "Brownout in Riverton, my appliances keep resetting"
+      ]
+    }
+  },
+  "unclustered_samples": [
+    "I think my latest electricity bill is too high, can you check the charges",
+    "How do I set up autopay for my monthly utility invoice",
+    "Entire block in Westbrook is down, transformer sparks reported",
+    "Requesting a copy of my past 6 months billing statements"
+  ]
+}
