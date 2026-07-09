@@ -4,9 +4,12 @@
 > where the parts connect. Behave like a real user by talking to the software
 > through its interface; for a web app, the HTTP REST API.*
 
-Integration tests drive the **real FastAPI app** against an in-memory MongoDB
+This folder holds representative integration tests (`test_ticket_journey.py` —
+register → login → create ticket → view, plus ownership isolation). Integration
+tests drive the **real FastAPI app** against an in-memory MongoDB
 (`mongomock-motor`) — no Docker, no Mongo, no model files — and act like a user
-calling the HTTP API. They live in each service's `tests/` folder:
+calling the HTTP API. The **full** suite lives in each service's `tests/`
+folder:
 
 | File | Feature wiring under test |
 |---|---|

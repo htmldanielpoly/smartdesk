@@ -5,8 +5,11 @@
 > independent of the code itself, so they aren't biased toward the existing
 > implementation.*
 
-Unit tests live **next to the code they test**, in each service's `tests/`
-folder, so they run in that service's environment with a single `pytest`:
+This folder holds representative unit tests (`test_scoring_and_status.py` —
+queue scoring, priority fallback, aging, SLA, and the ticket state machine).
+The **full** unit suite lives **next to the code it tests**, in each service's
+`tests/` folder, so it runs in that service's environment with a single
+`pytest`:
 
 | File | Unit under test |
 |---|---|
