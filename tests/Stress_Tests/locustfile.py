@@ -30,10 +30,13 @@ single load-generator host every virtual user shares one IP, so leave it
 lifted (step 1) for a meaningful load test — otherwise you are measuring the
 limiter, not the server.
 """
+"""
+Enhanced Stress / Load test — Behavioral UX user flows.
+Simulates realistic customer journeys and authenticated staff workflows.
+"""
 import itertools
 import random
-
-from locust import HttpUser, between, task
+from locust import HttpUser, SequentialTaskSet, between, task
 
 _counter = itertools.count()
 
@@ -45,91 +48,138 @@ TICKET_TEMPLATES = [
     ("App crashes on export", "Exporting a report throws a 500 error every time."),
 ]
 
+FORUM_POSTS = [
+    "Has anyone else experienced this issue today?",
+    "Thanks for the update, this helped solve my problem.",
+    "Still waiting on a response regarding this.",
+]
 
-class SupportUser(HttpUser):
-    """A regular customer: opens tickets and browses the forums."""
 
-    weight = 4
-    wait_time = between(1, 3)
+class CustomerBehavior(SequentialTaskSet):
+    """Simulates a complete step-by-step customer journey."""
 
     def on_start(self):
         n = next(_counter)
-        email = f"load_user_{n}_{random.randint(0, 1_000_000)}@example.com"
+        self.email = f"customer_{n}_{random.randint(0, 1_000_000)}@example.com"
+        self.password = "password123"
+        self.token = None
+        self.created_ticket_id = None
+
+        # 1. Register
         self.client.post(
             "/api/auth/register",
-            json={"email": email, "password": "password123", "display_name": f"Load {n}"},
-            name="POST /auth/register",
+            json={"email": self.email, "password": self.password, "display_name": f"Customer {n}"},
+            name="Customer: Register",
         )
-        r = self.client.post(
+        # 2. Login
+        res = self.client.post(
             "/api/auth/login",
-            json={"email": email, "password": "password123"},
-            name="POST /auth/login",
+            json={"email": self.email, "password": self.password},
+            name="Customer: Login",
         )
-        self.token = r.json().get("access_token") if r.status_code == 200 else None
+        if res.status_code == 200:
+            self.token = res.json().get("access_token")
 
     @property
-    def auth(self):
+    def headers(self):
         return {"Authorization": f"Bearer {self.token}"} if self.token else {}
 
-    @task(5)
-    def create_ticket(self):
+    @task
+    def create_support_ticket(self):
         if not self.token:
             return
         title, desc = random.choice(TICKET_TEMPLATES)
-        self.client.post(
+        res = self.client.post(
             "/api/tickets",
             json={"title": title, "description": desc},
-            headers=self.auth,
-            name="POST /tickets",
+            headers=self.headers,
+            name="Customer: Create Ticket",
         )
-
-    @task(3)
-    def list_my_tickets(self):
-        if not self.token:
-            return
-        self.client.get("/api/tickets", headers=self.auth, name="GET /tickets")
-
-    @task(2)
-    def browse_forums(self):
-        if not self.token:
-            return
-        self.client.get("/api/forums/boards", headers=self.auth, name="GET /forums/boards")
-
-    @task(1)
-    def health(self):
-        self.client.get("/health", name="GET /health")
-
-
-class AgentUser(HttpUser):
-    """An agent working the queue — heavier read/claim traffic."""
-
-    weight = 1
-    wait_time = between(1, 2)
-
-    def on_start(self):
-        # Agents can't self-promote, so in a load test they read the queue as
-        # authenticated users; without staff role these 403 — which is itself a
-        # useful signal. For a full agent load test, seed AGENT accounts first.
-        n = next(_counter)
-        email = f"load_agent_{n}_{random.randint(0, 1_000_000)}@example.com"
-        self.client.post(
-            "/api/auth/register",
-            json={"email": email, "password": "password123", "display_name": f"Agent {n}"},
-            name="POST /auth/register",
-        )
-        r = self.client.post(
-            "/api/auth/login",
-            json={"email": email, "password": "password123"},
-            name="POST /auth/login",
-        )
-        self.token = r.json().get("access_token") if r.status_code == 200 else None
+        if res.status_code == 201:
+            self.created_ticket_id = res.json().get("id")
 
     @task
-    def view_queue(self):
-        headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
-        # 403 for non-staff is expected; we still measure the endpoint's latency.
-        with self.client.get(
-            "/api/queue", headers=headers, name="GET /queue", catch_response=True
-        ) as resp:
-            if resp.status_code in (200, 403):
-                resp.success()
+    def add_comment_to_ticket(self):
+        if not self.token or not self.created_ticket_id:
+            return
+        self.client.post(
+            f"/api/tickets/{self.created_ticket_id}/comments",
+            json={"content": "Adding extra details regarding my issue."},
+            headers=self.headers,
+            name="Customer: Comment on Ticket",
+        )
+
+    @task
+    def browse_and_interact_on_forums(self):
+        if not self.token:
+            return
+        # Get boards
+        res = self.client.get("/api/forums/boards", headers=self.headers, name="Customer: View Boards")
+        if res.status_code == 200 and res.json():
+            board_slug = res.json()[0].get("slug")
+            # Get threads in board
+            threads_res = self.client.get(
+                f"/api/forums/boards/{board_slug}/threads",
+                headers=self.headers,
+                name="Customer: View Threads",
+            )
+            if threads_res.status_code == 200 and threads_res.json():
+                thread_id = threads_res.json()[0].get("id")
+                # Post reply
+                self.client.post(
+                    f"/api/forums/threads/{thread_id}/posts",
+                    json={"content": random.choice(FORUM_POSTS)},
+                    headers=self.headers,
+                    name="Customer: Post Forum Reply",
+                )
+
+
+class StaffBehavior(SequentialTaskSet):
+    """Simulates an active support agent handling incoming work."""
+
+    def on_start(self):
+        # Authenticate as bootstrap Admin/Agent
+        self.token = None
+        res = self.client.post(
+            "/api/auth/login",
+            json={"email": "admin@example.com", "password": "change-me-please-1"},
+            name="Staff: Login",
+        )
+        if res.status_code == 200:
+            self.token = res.json().get("access_token")
+
+    @property
+    def headers(self):
+        return {"Authorization": f"Bearer {self.token}"} if self.token else {}
+
+    @task
+    def process_queue_and_copilot(self):
+        if not self.token:
+            return
+        # 1. View queue stats
+        self.client.get("/api/queue/stats", headers=self.headers, name="Staff: Queue Stats")
+
+        # 2. Claim top ticket
+        claim_res = self.client.post("/api/queue/claim", headers=self.headers, name="Staff: Claim Ticket")
+        if claim_res.status_code == 200:
+            ticket = claim_res.json()
+            ticket_id = ticket.get("id")
+
+            # 3. Request AI Copilot response draft
+            self.client.post(
+                f"/api/tickets/{ticket_id}/ai/copilot",
+                headers=self.headers,
+                name="Staff: AI Copilot Draft",
+            )
+
+
+class CustomerUser(HttpUser):
+    weight = 4
+    wait_time = between(1, 3)
+    tasks = [CustomerBehavior]
+
+
+class StaffUser(HttpUser):
+    weight = 1
+    wait_time = between(2, 4)
+    tasks = [StaffBehavior]
