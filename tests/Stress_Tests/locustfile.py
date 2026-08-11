@@ -113,25 +113,38 @@ class CustomerBehavior(SequentialTaskSet):
     def browse_and_interact_on_forums(self):
         if not self.token:
             return
-        # Get boards
+
+        # 1. Get boards
         res = self.client.get("/api/forums/boards", headers=self.headers, name="Customer: View Boards")
         if res.status_code == 200 and res.json():
-            board_slug = res.json()[0].get("slug")
-            # Get threads in board
+            board_list = res.json()
+            board_slug = board_list[0].get("slug") if isinstance(board_list, list) else None
+
+            if not board_slug:
+                return
+
+            # 2. Get threads in board
             threads_res = self.client.get(
                 f"/api/forums/boards/{board_slug}/threads",
                 headers=self.headers,
                 name="Customer: View Threads",
             )
-            if threads_res.status_code == 200 and len(threads_res.json()) > 0:
-                thread_id = threads_res.json()[0].get("id")
-                # Post reply
-                self.client.post(
-                    f"/api/forums/threads/{thread_id}/posts",
-                    json={"content": random.choice(FORUM_POSTS)},
-                    headers=self.headers,
-                    name="Customer: Post Forum Reply",
-                )
+
+            if threads_res.status_code == 200:
+                data = threads_res.json()
+                # Bulletproof check: Extracts the array whether it is a raw list or wrapped in a dict
+                thread_list = data if isinstance(data, list) else data.get("items", data.get("threads", []))
+
+                if thread_list and len(thread_list) > 0:
+                    thread_id = thread_list[0].get("id")
+
+                    # 3. Post reply
+                    self.client.post(
+                        f"/api/forums/threads/{thread_id}/posts",
+                        json={"content": random.choice(FORUM_POSTS)},
+                        headers=self.headers,
+                        name="Customer: Post Forum Reply",
+                    )
 
 
 class StaffBehavior(SequentialTaskSet):
