@@ -99,14 +99,14 @@ class CustomerBehavior(SequentialTaskSet):
             self.created_ticket_id = res.json().get("id")
 
     @task
-    def add_comment_to_ticket(self):
+    def update_ticket_description(self):
         if not self.token or not self.created_ticket_id:
             return
-        self.client.post(
-            f"/api/tickets/{self.created_ticket_id}/comments",
-            json={"content": "Adding extra details regarding my issue."},
+        self.client.patch(
+            f"/api/tickets/{self.created_ticket_id}",
+            json={"description": "Updating ticket description with additional diagnostic information."},
             headers=self.headers,
-            name="Customer: Comment on Ticket",
+            name="Customer: Update Ticket",
         )
 
     @task
@@ -123,7 +123,7 @@ class CustomerBehavior(SequentialTaskSet):
                 headers=self.headers,
                 name="Customer: View Threads",
             )
-            if threads_res.status_code == 200 and threads_res.json():
+            if threads_res.status_code == 200 and len(threads_res.json()) > 0:
                 thread_id = threads_res.json()[0].get("id")
                 # Post reply
                 self.client.post(
