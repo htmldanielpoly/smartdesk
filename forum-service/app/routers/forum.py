@@ -15,6 +15,8 @@ from app.schemas import (
     ThreadModerate,
     ThreadOut,
     ThreadPage,
+    DirectMessageCreate,  # NEW
+    DirectMessageOut  # NEW
 )
 from app.serializers import serialize_board, serialize_post, serialize_thread
 
@@ -41,9 +43,18 @@ async def _get_thread_or_404(thread_id: str) -> dict:
     return thread
 
 
+async def _get_post_or_404(post_id: str) -> dict:
+    post = await get_db().posts.find_one({"_id": _oid(post_id, "Post not found")})
+    if post is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+    return post
+
+
 def _is_staff(user: dict) -> bool:
     return user["role"] in (Role.AGENT.value, Role.ADMIN.value)
 
+
+# --- Existing Endpoints (Updated with new schema fields) ---
 
 @router.get("/boards", response_model=list[BoardOut])
 async def list_boards(user: dict = Depends(get_current_user)):
@@ -57,9 +68,9 @@ async def list_boards(user: dict = Depends(get_current_user)):
 
 @router.get("/boards/{slug}/threads", response_model=ThreadPage)
 async def list_threads(
-    slug: str,
-    page: int = Query(default=1, ge=1),
-    user: dict = Depends(get_current_user),
+        slug: str,
+        page: int = Query(default=1, ge=1),
+        user: dict = Depends(get_current_user),
 ):
     """Threads on a board: pinned first, then newest activity first."""
     board = await _get_board_or_404(slug)
@@ -85,24 +96,30 @@ async def list_threads(
     "/boards/{slug}/threads", response_model=ThreadOut, status_code=status.HTTP_201_CREATED
 )
 async def create_thread(
-    slug: str,
-    payload: ThreadCreate,
-    user: dict = Depends(get_current_user),
+        slug: str,
+        payload: ThreadCreate,
+        user: dict = Depends(get_current_user),
 ):
     """Any authenticated user opens a thread; its body becomes the first post."""
     board = await _get_board_or_404(slug)
 
     now = datetime.now(UTC)
+
+    # NEW: Initialize engagement arrays and handle anonymity/media
     thread_doc = {
         "boardSlug": board["slug"],
         "title": payload.title,
         "authorId": user["id"],
         "authorRole": user["role"],
+        "isAnonymous": payload.is_anonymous,
+        "mediaUrls": payload.media_urls,
         "createdAt": now,
         "lastPostAt": now,
         "postCount": 1,
         "locked": False,
         "pinned": False,
+        "likes": [],
+        "dislikes": []
     }
     result = await get_db().threads.insert_one(thread_doc)
     thread_doc["_id"] = result.inserted_id
@@ -112,9 +129,13 @@ async def create_thread(
             "threadId": result.inserted_id,
             "authorId": user["id"],
             "authorRole": user["role"],
+            "isAnonymous": payload.is_anonymous,
+            "mediaUrls": payload.media_urls,
             "body": payload.body,
             "deleted": False,
             "createdAt": now,
+            "likes": [],
+            "dislikes": []
         }
     )
     return serialize_thread(thread_doc)
@@ -134,9 +155,9 @@ async def get_thread(thread_id: str, user: dict = Depends(get_current_user)):
     "/threads/{thread_id}/posts", response_model=PostOut, status_code=status.HTTP_201_CREATED
 )
 async def create_post(
-    thread_id: str,
-    payload: PostCreate,
-    user: dict = Depends(get_current_user),
+        thread_id: str,
+        payload: PostCreate,
+        user: dict = Depends(get_current_user),
 ):
     thread = await _get_thread_or_404(thread_id)
     if thread.get("locked", False):
@@ -147,9 +168,13 @@ async def create_post(
         "threadId": thread["_id"],
         "authorId": user["id"],
         "authorRole": user["role"],
+        "isAnonymous": payload.is_anonymous,
+        "mediaUrls": payload.media_urls,
         "body": payload.body,
         "deleted": False,
         "createdAt": now,
+        "likes": [],
+        "dislikes": []
     }
     result = await get_db().posts.insert_one(doc)
     doc["_id"] = result.inserted_id
@@ -163,9 +188,9 @@ async def create_post(
 
 @router.patch("/threads/{thread_id}", response_model=ThreadOut)
 async def moderate_thread(
-    thread_id: str,
-    payload: ThreadModerate,
-    user: dict = Depends(require_roles(Role.AGENT, Role.ADMIN)),
+        thread_id: str,
+        payload: ThreadModerate,
+        user: dict = Depends(require_roles(Role.AGENT, Role.ADMIN)),
 ):
     """AGENT/ADMIN moderation: lock (no new replies) and/or pin (sort first)."""
     thread = await _get_thread_or_404(thread_id)
@@ -194,3 +219,93 @@ async def delete_post(post_id: str, user: dict = Depends(get_current_user)):
     await get_db().posts.update_one({"_id": post["_id"]}, {"$set": {"deleted": True}})
     post["deleted"] = True
     return serialize_post(post)
+
+
+# --- NEW: Engagement Endpoints ---
+
+@router.post("/threads/{thread_id}/like", status_code=status.HTTP_200_OK)
+async def like_thread(thread_id: str, user: dict = Depends(get_current_user)):
+    """Add user to thread likes, remove from dislikes."""
+    thread = await _get_thread_or_404(thread_id)
+    await get_db().threads.update_one(
+        {"_id": thread["_id"]},
+        {"$addToSet": {"likes": user["id"]}, "$pull": {"dislikes": user["id"]}}
+    )
+    return {"detail": "Thread liked successfully"}
+
+
+@router.post("/threads/{thread_id}/dislike", status_code=status.HTTP_200_OK)
+async def dislike_thread(thread_id: str, user: dict = Depends(get_current_user)):
+    """Add user to thread dislikes, remove from likes."""
+    thread = await _get_thread_or_404(thread_id)
+    await get_db().threads.update_one(
+        {"_id": thread["_id"]},
+        {"$addToSet": {"dislikes": user["id"]}, "$pull": {"likes": user["id"]}}
+    )
+    return {"detail": "Thread disliked successfully"}
+
+
+@router.post("/posts/{post_id}/like", status_code=status.HTTP_200_OK)
+async def like_post(post_id: str, user: dict = Depends(get_current_user)):
+    """Add user to post likes, remove from dislikes."""
+    post = await _get_post_or_404(post_id)
+    await get_db().posts.update_one(
+        {"_id": post["_id"]},
+        {"$addToSet": {"likes": user["id"]}, "$pull": {"dislikes": user["id"]}}
+    )
+    return {"detail": "Post liked successfully"}
+
+
+@router.post("/posts/{post_id}/dislike", status_code=status.HTTP_200_OK)
+async def dislike_post(post_id: str, user: dict = Depends(get_current_user)):
+    """Add user to post dislikes, remove from likes."""
+    post = await _get_post_or_404(post_id)
+    await get_db().posts.update_one(
+        {"_id": post["_id"]},
+        {"$addToSet": {"dislikes": user["id"]}, "$pull": {"likes": user["id"]}}
+    )
+    return {"detail": "Post disliked successfully"}
+
+
+# --- NEW: Direct Messaging Endpoints ---
+
+def _serialize_dm(doc: dict) -> dict:
+    """Helper to convert MongoDB _id to string id for Pydantic."""
+    doc["id"] = str(doc.pop("_id"))
+    return doc
+
+
+@router.post("/messages", response_model=DirectMessageOut, status_code=status.HTTP_201_CREATED)
+async def create_direct_message(
+        payload: DirectMessageCreate,
+        user: dict = Depends(get_current_user)
+):
+    """Sends a direct message to another user."""
+    doc = {
+        "sender_id": user["id"],
+        "recipient_id": payload.recipient_id,
+        "content": payload.content,
+        "media_urls": payload.media_urls,
+        "created_at": datetime.now(UTC),
+        "is_read": False
+    }
+    result = await get_db().direct_messages.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    return _serialize_dm(doc)
+
+
+@router.get("/messages/{other_user_id}", response_model=list[DirectMessageOut])
+async def get_direct_messages(
+        other_user_id: str,
+        limit: int = Query(default=50, le=100),
+        user: dict = Depends(get_current_user)
+):
+    """Retrieves chronological chat history between current user and another user."""
+    query = {
+        "$or": [
+            {"sender_id": user["id"], "recipient_id": other_user_id},
+            {"sender_id": other_user_id, "recipient_id": user["id"]}
+        ]
+    }
+    cursor = get_db().direct_messages.find(query).sort("created_at", 1).limit(limit)
+    return [_serialize_dm(doc) async for doc in cursor]
