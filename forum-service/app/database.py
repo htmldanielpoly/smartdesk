@@ -37,6 +37,14 @@ async def disconnect() -> None:
 
 
 async def _ensure_indexes(db: AsyncIOMotorDatabase) -> None:
+    # Existing indexes
     await db.boards.create_index("slug", unique=True)
     await db.threads.create_index([("boardSlug", 1), ("lastPostAt", -1)])
     await db.posts.create_index([("threadId", 1), ("createdAt", 1)])
+
+    # NEW: Indexes for Direct Messages
+    # Speeds up querying the chat history between two specific users
+    await db.direct_messages.create_index([("sender_id", 1), ("recipient_id", 1)])
+    await db.direct_messages.create_index([("recipient_id", 1), ("sender_id", 1)])
+    # Speeds up sorting the chat history by time
+    await db.direct_messages.create_index("created_at")
