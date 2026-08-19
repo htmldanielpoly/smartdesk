@@ -8,7 +8,7 @@ the point of stateless JWTs between microservices — no cross-service lookup.
 from enum import Enum
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status ,Query, WebSocketException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import settings
@@ -58,3 +58,25 @@ def require_roles(*roles: Role):
         return user
 
     return _checker
+
+
+# NEW: Add this at the bottom of the file
+async def get_ws_user(token: str = Query(...)) -> dict:
+    """Authenticates WebSockets via query parameter instead of headers."""
+    try:
+        payload = jwt.decode(
+            token, settings.jwt_secret, algorithms=[settings.jwt_algorithm]
+        )
+    except jwt.PyJWTError:
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="Invalid or expired token",
+        )
+
+    user_id = payload.get("sub")
+    role = payload.get("role")
+    if not user_id or role not in {r.value for r in Role}:
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token payload"
+        )
+    return {"id": user_id, "role": role}

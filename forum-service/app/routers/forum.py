@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status,WebSocket, 
 
 from app.config import settings
 from app.database import get_db
-from app.deps import Role, get_current_user, require_roles
+from app.deps import Role, get_current_user, require_roles,get_ws_user
 from app.schemas import (
     BoardOut,
     PostCreate,
