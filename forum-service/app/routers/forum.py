@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status,WebSocket, WebSocketDisconnect
 
 from app.config import settings
 from app.database import get_db
@@ -15,9 +15,10 @@ from app.schemas import (
     ThreadModerate,
     ThreadOut,
     ThreadPage,
-    DirectMessageCreate,  # NEW
-    DirectMessageOut  # NEW
+    DirectMessageCreate,
+    DirectMessageOut
 )
+from app.websockets import manager
 from app.serializers import serialize_board, serialize_post, serialize_thread
 
 router = APIRouter(tags=["forum"])
@@ -291,8 +292,17 @@ async def create_direct_message(
     }
     result = await get_db().direct_messages.insert_one(doc)
     doc["_id"] = result.inserted_id
-    return _serialize_dm(doc)
 
+    serialized_dm = _serialize_dm(doc)
+
+    # NEW: Send real-time notification to the recipient
+    notification_payload = {
+        "type": "new_direct_message",
+        "data": serialized_dm
+    }
+    await manager.send_personal_message(notification_payload, payload.recipient_id)
+
+    return serialized_dm
 
 @router.get("/messages/{other_user_id}", response_model=list[DirectMessageOut])
 async def get_direct_messages(
@@ -309,3 +319,17 @@ async def get_direct_messages(
     }
     cursor = get_db().direct_messages.find(query).sort("created_at", 1).limit(limit)
     return [_serialize_dm(doc) async for doc in cursor]
+
+
+
+@router.websocket("/ws/notifications/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, user_id: str):
+    """Establishes a persistent WebSocket connection for real-time notifications."""
+    await manager.connect(websocket, user_id)
+    try:
+        while True:
+            # Keep the connection open and wait for incoming messages from the client
+            # (Even if the client only receives, this loop is required to maintain state)
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, user_id)
