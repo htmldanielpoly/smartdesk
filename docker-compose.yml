@@ -34,6 +34,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change-me-in-prod}   # must match api-service
     networks:
       - smartdesk
+    ports: # <-- ADD THIS LINE
+      - "8001:8001"       # <-- ADD THIS LINE
     # Internal only — reachable from api-service at http://forum-service:8001.
 
   api-service:
