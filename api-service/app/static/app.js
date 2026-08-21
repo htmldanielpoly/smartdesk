@@ -683,9 +683,35 @@ async function viewThread(v, id) {
   v.innerHTML = "";
   v.appendChild(backBtn("Back to board", "board", th.board_slug));
 
-  const head = el(`<div class="page-head"><h2>${th.pinned ? "📌 " : ""}${th.locked ? "🔒 " : ""}${esc(th.title)}</h2></div>`);
+  // 1. THREAD HEADER & THREAD ENGAGEMENT METRICS
+  const head = el(`<div class="page-head" style="flex-direction:column; align-items:start;">
+    <h2>${th.pinned ? "📌 " : ""}${th.locked ? "🔒 " : ""}${esc(th.title)}</h2>
+  </div>`);
+
+  const thLikes = th.likes || [];
+  const thDislikes = th.dislikes || [];
+  const thHasLiked = thLikes.includes(state.userId);
+  const thHasDisliked = thDislikes.includes(state.userId);
+
+  const engageBar = el(`
+    <div class="engagement-bar" style="border:none; margin-top:0; padding-top:4px; gap:8px;">
+      <button class="btn-engage ${thHasLiked ? 'active' : ''}" id="th-like">👍 ${thLikes.length}</button>
+      <button class="btn-engage ${thHasDisliked ? 'active' : ''}" id="th-dislike">👎 ${thDislikes.length}</button>
+    </div>
+  `);
+
+  engageBar.querySelector("#th-like").onclick = async () => {
+    try { await api("POST", `/api/forums/threads/${id}/like`); navigate("thread", id); }
+    catch(e) { toast(e.detail, true); }
+  };
+  engageBar.querySelector("#th-dislike").onclick = async () => {
+    try { await api("POST", `/api/forums/threads/${id}/dislike`); navigate("thread", id); }
+    catch(e) { toast(e.detail, true); }
+  };
+  head.appendChild(engageBar);
+
   if (isStaff()) {
-    const mod = el('<div class="row" style="flex:0 0 auto;gap:8px"></div>');
+    const mod = el('<div class="row" style="flex:0 0 auto;gap:8px;margin-top:10px;"></div>');
     const lock = el(`<button class="btn ghost sm">${th.locked ? "Unlock" : "Lock"}</button>`);
     lock.onclick = () => moderate(id, { locked: !th.locked });
     const pin = el(`<button class="btn ghost sm">${th.pinned ? "Unpin" : "Pin"}</button>`);
@@ -695,14 +721,20 @@ async function viewThread(v, id) {
   }
   v.appendChild(head);
 
+  // 2. POST LOOP & POST ENGAGEMENT METRICS
   const stack = el('<div class="stack"></div>');
   for (const p of detail.posts) {
     const me = p.author_id === state.userId;
     const canDel = !p.deleted && (me || isStaff());
 
-    // FIX: Safely handle null author_ids and roles for anonymous posts
+    // Safely handle null author_ids and roles for anonymous posts
     const authorName = p.is_anonymous ? "Anonymous" : (me ? "You" : (p.author_id ? p.author_id.slice(-6) : "Unknown"));
     const roleBadge = p.author_role ? `<span class="badge soft">${p.author_role}</span>` : "";
+
+    const likes = p.likes || [];
+    const dislikes = p.dislikes || [];
+    const hasLiked = likes.includes(state.userId);
+    const hasDisliked = dislikes.includes(state.userId);
 
     const post = el(`<div class="card card-pad">
       <div class="comment-head" style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-bottom:8px">
@@ -710,7 +742,25 @@ async function viewThread(v, id) {
         <span>${timeAgo(p.created_at)}</span>
       </div>
       <div style="white-space:pre-wrap">${p.deleted ? '<em class="muted">[deleted]</em>' : esc(p.body)}</div>
+      
+      ${!p.deleted ? `
+      <div class="engagement-bar">
+        <button class="btn-engage ${hasLiked ? 'active' : ''}" id="like-${p.id}">👍 ${likes.length}</button>
+        <button class="btn-engage ${hasDisliked ? 'active' : ''}" id="dislike-${p.id}">👎 ${dislikes.length}</button>
+      </div>` : ''}
     </div>`);
+
+    if (!p.deleted) {
+      post.querySelector(`#like-${p.id}`).onclick = async () => {
+        try { await api("POST", `/api/forums/posts/${p.id}/like`); navigate("thread", id); }
+        catch (e) { toast(e.detail, true); }
+      };
+
+      post.querySelector(`#dislike-${p.id}`).onclick = async () => {
+        try { await api("POST", `/api/forums/posts/${p.id}/dislike`); navigate("thread", id); }
+        catch (e) { toast(e.detail, true); }
+      };
+    }
 
     if (canDel) {
       const d = el('<button class="btn danger sm" style="margin-top:10px">Delete</button>');
@@ -721,11 +771,11 @@ async function viewThread(v, id) {
   }
   v.appendChild(stack);
 
+  // 3. REPLY COMPOSER
   if (!th.locked) {
     const reply = el(`<div class="card card-pad" style="margin-top:14px">
       <textarea id="rp-body" placeholder="Write a reply…"></textarea>
       
-      <!-- ADDED: Anonymous Checkbox -->
       <label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:13px">
         <input type="checkbox" id="rp-anon" style="width:auto">Post anonymously
       </label>
@@ -735,17 +785,18 @@ async function viewThread(v, id) {
 
     reply.querySelector("#rp-send").onclick = async () => {
       const body = reply.querySelector("#rp-body").value.trim();
-      const is_anonymous = reply.querySelector("#rp-anon").checked; // ADDED
+      const is_anonymous = reply.querySelector("#rp-anon").checked;
 
       if (!body) return;
       try {
-        // ADDED is_anonymous to the payload
         await api("POST", `/api/forums/threads/${id}/posts`, { body, is_anonymous });
         navigate("thread", id);
       }
       catch (e) { toast(e.detail, true); }
     };
     v.appendChild(reply);
+  } else {
+    v.appendChild(el('<p class="muted" style="text-align:center;margin-top:16px">🔒 This thread is locked.</p>'));
   }
 
   async function moderate(tid, flags) {
