@@ -648,15 +648,29 @@ function openThreadComposer(v, slug) {
     <h3 style="margin-top:0">New thread</h3>
     <label class="field"><span>Title</span><input id="th-title" maxlength="160" /></label>
     <label class="field"><span>Message</span><textarea id="th-body" maxlength="5000"></textarea></label>
+    
+    <!-- ADDED: Anonymous Checkbox -->
+    <label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:13px">
+      <input type="checkbox" id="th-anon" style="width:auto">Post anonymously
+    </label>
+    
     <div class="err-text" id="th-err"></div>
     <button class="btn" id="th-post">Post thread</button>
   </div>`);
   v.querySelector(".page-head").after(modal);
+
   modal.querySelector("#th-post").onclick = async () => {
     const title = modal.querySelector("#th-title").value.trim();
     const body = modal.querySelector("#th-body").value.trim();
+    const is_anonymous = modal.querySelector("#th-anon").checked; // ADDED
+
     if (!title || !body) { modal.querySelector("#th-err").textContent = "Title and message required."; return; }
-    try { const th = await api("POST", `/api/forums/boards/${slug}/threads`, { title, body }); toast("Thread posted"); navigate("thread", th.id); }
+    try {
+      // ADDED is_anonymous to the payload
+      const th = await api("POST", `/api/forums/boards/${slug}/threads`, { title, body, is_anonymous });
+      toast("Thread posted");
+      navigate("thread", th.id);
+    }
     catch (e) { modal.querySelector("#th-err").textContent = e.detail; }
   };
 }
@@ -685,13 +699,19 @@ async function viewThread(v, id) {
   for (const p of detail.posts) {
     const me = p.author_id === state.userId;
     const canDel = !p.deleted && (me || isStaff());
+
+    // FIX: Safely handle null author_ids and roles for anonymous posts
+    const authorName = p.is_anonymous ? "Anonymous" : (me ? "You" : (p.author_id ? p.author_id.slice(-6) : "Unknown"));
+    const roleBadge = p.author_role ? `<span class="badge soft">${p.author_role}</span>` : "";
+
     const post = el(`<div class="card card-pad">
       <div class="comment-head" style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-bottom:8px">
-        <span>${me ? "You" : p.author_id.slice(-6)} · <span class="badge soft">${p.author_role}</span></span>
+        <span>${authorName} ${roleBadge ? ` · ${roleBadge}` : ""}</span>
         <span>${timeAgo(p.created_at)}</span>
       </div>
       <div style="white-space:pre-wrap">${p.deleted ? '<em class="muted">[deleted]</em>' : esc(p.body)}</div>
     </div>`);
+
     if (canDel) {
       const d = el('<button class="btn danger sm" style="margin-top:10px">Delete</button>');
       d.onclick = async () => { try { await api("DELETE", `/api/forums/posts/${p.id}`); toast("Post deleted"); navigate("thread", id); } catch (e) { toast(e.detail, true); } };
@@ -704,17 +724,28 @@ async function viewThread(v, id) {
   if (!th.locked) {
     const reply = el(`<div class="card card-pad" style="margin-top:14px">
       <textarea id="rp-body" placeholder="Write a reply…"></textarea>
+      
+      <!-- ADDED: Anonymous Checkbox -->
+      <label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:13px">
+        <input type="checkbox" id="rp-anon" style="width:auto">Post anonymously
+      </label>
+      
       <button class="btn sm" id="rp-send" style="margin-top:10px">Reply</button>
     </div>`);
+
     reply.querySelector("#rp-send").onclick = async () => {
       const body = reply.querySelector("#rp-body").value.trim();
+      const is_anonymous = reply.querySelector("#rp-anon").checked; // ADDED
+
       if (!body) return;
-      try { await api("POST", `/api/forums/threads/${id}/posts`, { body }); navigate("thread", id); }
+      try {
+        // ADDED is_anonymous to the payload
+        await api("POST", `/api/forums/threads/${id}/posts`, { body, is_anonymous });
+        navigate("thread", id);
+      }
       catch (e) { toast(e.detail, true); }
     };
     v.appendChild(reply);
-  } else {
-    v.appendChild(el('<p class="muted" style="text-align:center;margin-top:16px">🔒 This thread is locked.</p>'));
   }
 
   async function moderate(tid, flags) {
