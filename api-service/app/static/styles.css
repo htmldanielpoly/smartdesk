@@ -273,3 +273,36 @@ textarea { resize: vertical; min-height: 96px; }
   .nav-foot, .nav-spacer { display: none; }
   .detail-grid { grid-template-columns: 1fr; }
 }
+/* ---------- Engagement (Likes / Dislikes) ---------- */
+.engagement-bar {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.btn-engage {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s;
+}
+
+.btn-engage:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.btn-engage.active {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-soft);
+}
