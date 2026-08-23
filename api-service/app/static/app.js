@@ -91,6 +91,7 @@ function setSession(token, role) {
   localStorage.setItem("sd_uid", state.userId || "");
 }
 function logout() {
+  if (wsConnection) wsConnection.close(); // ADDED: Disconnect WebSocket
   ["sd_token", "sd_role", "sd_uid", "sd_name"].forEach((k) => localStorage.removeItem(k));
   Object.assign(state, { token: null, role: null, userId: null, name: "" });
   showAuth();
@@ -106,6 +107,8 @@ function showApp() {
   $("#user-name").textContent = state.name || "Signed in";
   $("#user-role").textContent = state.role;
   $("#user-avatar").textContent = initials(state.name);
+
+  connectWebSocket(); // ADDED: Start listening for live messages
   buildNav();
   navigate(isStaff() ? "queue" : "tickets");
 }
@@ -150,6 +153,7 @@ const NAV = [
   { id: "queue", label: "Queue", ico: "📥", staffOnly: true },
   { id: "incidents", label: "Incidents", ico: "⚡", staffOnly: true },
   { id: "forums", label: "Forums", ico: "💬" },
+  { id: "messages", label: "Messages", ico: "✉️" }, /* ADDED THIS LINE */
   { id: "admin", label: "Users", ico: "👤", adminOnly: true },
 ];
 let currentView = null;
@@ -177,7 +181,7 @@ function navigate(view, arg) {
   v.innerHTML = '<div class="spinner"></div>';
   ({ tickets: viewTickets, ticket: viewTicket, newTicket: viewNewTicket,
      queue: viewQueue, incidents: viewIncidents, forums: viewForums, board: viewBoard,
-     thread: viewThread, admin: viewAdmin })[view](v, arg);
+     thread: viewThread, admin: viewAdmin, messages: viewMessages })[view](v, arg); // ADDED messages: viewMessages
 }
 
 function backBtn(label, view, arg) {
@@ -695,8 +699,14 @@ async function viewThread(v, id) {
 
   const engageBar = el(`
     <div class="engagement-bar" style="border:none; margin-top:0; padding-top:4px; gap:8px;">
-      <button class="btn-engage ${thHasLiked ? 'active' : ''}" id="th-like">👍 ${thLikes.length}</button>
-      <button class="btn-engage ${thHasDisliked ? 'active' : ''}" id="th-dislike">👎 ${thDislikes.length}</button>
+      <button class="btn-engage ${thHasLiked ? 'active' : ''}" id="th-like">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg> 
+        ${thLikes.length}
+      </button>
+      <button class="btn-engage ${thHasDisliked ? 'active' : ''}" id="th-dislike">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-2"></path></svg> 
+        ${thDislikes.length}
+      </button>
     </div>
   `);
 
@@ -745,8 +755,14 @@ async function viewThread(v, id) {
       
       ${!p.deleted ? `
       <div class="engagement-bar">
-        <button class="btn-engage ${hasLiked ? 'active' : ''}" id="like-${p.id}">👍 ${likes.length}</button>
-        <button class="btn-engage ${hasDisliked ? 'active' : ''}" id="dislike-${p.id}">👎 ${dislikes.length}</button>
+        <button class="btn-engage ${hasLiked ? 'active' : ''}" id="like-${p.id}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg> 
+          ${likes.length}
+        </button>
+        <button class="btn-engage ${hasDisliked ? 'active' : ''}" id="dislike-${p.id}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-2"></path></svg> 
+          ${dislikes.length}
+        </button>
       </div>` : ''}
     </div>`);
 
@@ -835,5 +851,154 @@ function renderError(v, e) {
   v.appendChild(el(`<div class="empty"><div class="big">⚠️</div>${esc(e.detail || "Something went wrong")}</div>`));
 }
 
+
+
+/* ---------- Direct Messages ---------- */
+async function viewMessages(v, activeUserId = null) {
+  window.currentChatId = activeUserId; // Required for WebSockets later
+
+  v.innerHTML = "";
+  v.appendChild(el(`<div class="page-head"><h2>Direct Messages</h2></div>`));
+
+  // Fetch all users so ANY client can message ANY client
+  let allUsers = [];
+  try {
+    allUsers = await api("GET", "/api/auth/directory"); // Targeted to the auth router
+  } catch (e) {
+    console.warn("Could not load user directory.");
+  }
+
+  // Remove the current user from the contact list (you can't chat with yourself)
+  const peers = allUsers.filter(u => u.id !== state.userId);
+
+  const layout = el(`<div class="chat-layout card">
+    <div class="chat-sidebar" style="display:flex; flex-direction:column;">
+      
+      <!-- Global User Dropdown -->
+      <div style="padding:12px; border-bottom: 1px solid var(--border); background: var(--surface);">
+        <label class="field" style="margin-bottom:0;">
+          <span style="font-size:11px; color:var(--text-muted);">Start new conversation</span>
+          <div style="display:flex; gap:6px; margin-top:4px;">
+            <select id="new-chat-select" style="padding:6px; font-size:12px; flex:1;">
+              <option value="">Select a user...</option>
+              ${peers.map(p => `<option value="${p.id}">${esc(p.display_name)}</option>`).join("")}
+            </select>
+            <button class="btn sm" id="btn-new-chat">Chat</button>
+          </div>
+        </label>
+      </div>
+      
+      <div id="contact-list" style="flex:1; overflow-y:auto;"></div>
+    </div>
+    <div class="chat-window">
+      <div class="chat-history" id="chat-history">
+        <div class="empty"><div class="big">✉️</div>Select a conversation to start chatting.</div>
+      </div>
+      <div class="chat-input-area" id="chat-input-area" style="display:none;">
+        <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off" />
+        <button class="btn" id="chat-send">Send</button>
+      </div>
+    </div>
+  </div>`);
+
+  const contactList = layout.querySelector("#contact-list");
+  const historyBox = layout.querySelector("#chat-history");
+  const inputArea = layout.querySelector("#chat-input-area");
+
+  // Handle the dropdown Chat button
+  layout.querySelector("#btn-new-chat").onclick = () => {
+    const targetId = layout.querySelector("#new-chat-select").value;
+    if (targetId) navigate("messages", targetId);
+  };
+
+  // Render the contacts in the sidebar
+  for (const peer of peers) {
+    const peerBtn = el(`<div class="chat-peer ${activeUserId === peer.id ? 'active' : ''}">
+      <div class="avatar">${initials(peer.display_name)}</div>
+      <div class="grow"><div class="title">${esc(peer.display_name)}</div><div class="sub">${esc(peer.role)}</div></div>
+    </div>`);
+    peerBtn.onclick = () => navigate("messages", peer.id);
+    contactList.appendChild(peerBtn);
+  }
+
+  v.appendChild(layout);
+
+  // Load the active conversation
+  if (activeUserId) {
+    inputArea.style.display = "flex";
+    historyBox.innerHTML = '<div class="spinner"></div>';
+
+    try {
+      const messages = await api("GET", `/api/forums/messages/${activeUserId}`);
+      historyBox.innerHTML = "";
+
+      if (!messages.length) {
+        historyBox.appendChild(el('<div class="empty">No messages yet. Say hello!</div>'));
+      } else {
+        for (const m of messages) {
+          const isMe = m.sender_id === state.userId;
+          historyBox.appendChild(el(`
+            <div class="chat-bubble ${isMe ? 'me' : 'them'}">
+              <div class="text">${esc(m.content)}</div>
+              <div class="time">${timeAgo(m.created_at)}</div>
+            </div>
+          `));
+        }
+        historyBox.scrollTop = historyBox.scrollHeight; // Auto-scroll to latest message
+      }
+
+      layout.querySelector("#chat-send").onclick = async () => {
+        const content = layout.querySelector("#chat-input").value.trim();
+        if (!content) return;
+        try {
+          await api("POST", `/api/forums/messages`, { recipient_id: activeUserId, content });
+          navigate("messages", activeUserId);
+        } catch (e) { toast(e.detail, true); }
+      };
+    } catch (e) { historyBox.innerHTML = `<p class="err-text">${esc(e.detail)}</p>`; }
+  }
+}
+
+
+
+/* ---------- Live WebSockets ---------- */
+let wsConnection = null;
+
+function connectWebSocket() {
+  if (wsConnection) return;
+
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  wsConnection = new WebSocket(`${protocol}//${window.location.host}/api/forums/ws?token=${state.token}`);
+
+  wsConnection.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    const historyBox = document.getElementById("chat-history");
+
+    // If we are actively chatting with the sender, inject the message bubble immediately
+    if (currentView === "messages" && historyBox && window.currentChatId === msg.sender_id) {
+      const emptyPlaceholder = historyBox.querySelector(".empty");
+      if (emptyPlaceholder) emptyPlaceholder.remove();
+
+      historyBox.appendChild(el(`
+        <div class="chat-bubble them">
+          <div class="text">${esc(msg.content)}</div>
+          <div class="time">just now</div>
+        </div>
+      `));
+      historyBox.scrollTop = historyBox.scrollHeight;
+    } else {
+      // If we are on another tab or chatting with someone else, show a notification toast
+      toast("📩 New direct message received!");
+    }
+  };
+
+  wsConnection.onclose = () => { wsConnection = null; };
+}
+
+
+
+
+
 /* ---------- boot ---------- */
 if (state.token) showApp(); else showAuth();
+

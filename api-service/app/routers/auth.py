@@ -46,3 +46,18 @@ async def login(payload: LoginRequest, _: None = Depends(rate_limit)):
 
     token = create_access_token(str(user["_id"]), user["role"])
     return TokenResponse(access_token=token, role=Role(user["role"]))
+
+
+@router.get("/directory")
+async def get_user_directory():
+    # Ensure your database dependency (e.g., get_db) is imported
+    cursor = get_db().users.find().sort("display_name", 1)
+    return [
+        {
+            "id": str(u["_id"]),
+            # FIX: Fallback to email prefix if display_name is missing
+            "display_name": u.get("display_name") or u.get("email", "Unknown").split("@")[0],
+            "role": u.get("role", "USER")
+        }
+        async for u in cursor
+    ]

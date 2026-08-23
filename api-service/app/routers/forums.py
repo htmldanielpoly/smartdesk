@@ -7,8 +7,11 @@ and Authorization header verbatim and relays the forum-service's response.
 Auth itself is enforced by the forum-service (same JWT secret).
 """
 import httpx
-from fastapi import APIRouter, Request, status
+import asyncio
+import websockets
+from fastapi import APIRouter, Request, status ,WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
+
 
 from app.config import settings
 
@@ -47,3 +50,33 @@ async def proxy(path: str, request: Request) -> JSONResponse:
     except ValueError:
         content = None
     return JSONResponse(status_code=resp.status_code, content=content)
+
+
+@router.websocket("/ws")
+async def websocket_proxy(websocket: WebSocket, token: str):
+    await websocket.accept()
+    # Convert the internal HTTP url to a WS url
+    target_ws_url = f"{settings.forum_service_url.replace('http', 'ws')}/ws?token={token}"
+
+    try:
+        async with websockets.connect(target_ws_url) as backend_ws:
+            async def to_backend():
+                try:
+                    while True:
+                        data = await websocket.receive_text()
+                        await backend_ws.send(data)
+                except WebSocketDisconnect:
+                    pass
+
+            async def to_frontend():
+                try:
+                    while True:
+                        data = await backend_ws.recv()
+                        await websocket.send_text(data)
+                except websockets.exceptions.ConnectionClosed:
+                    pass
+
+            # Run both relay tasks concurrently
+            await asyncio.gather(to_backend(), to_frontend())
+    except Exception:
+        await websocket.close()
