@@ -88,3 +88,17 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}/${{ matrix.service }}:latest
             ghcr.io/${{ github.repository }}/${{ matrix.service }}:${{ github.sha }}
+  
+  deploy:
+    runs-on: self-hosted
+    needs: publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Windows Docker Desktop
+        run: |
+          docker compose down
+          docker compose up -d --build
