@@ -273,6 +273,11 @@ async def dislike_post(post_id: str, user: dict = Depends(get_current_user)):
 def _serialize_dm(doc: dict) -> dict:
     """Helper to convert MongoDB _id to string id for Pydantic."""
     doc["id"] = str(doc.pop("_id"))
+
+    # Convert datetime to an ISO 8601 string so json.dumps can serialize it
+    if "created_at" in doc and hasattr(doc["created_at"], "isoformat"):
+        doc["created_at"] = doc["created_at"].isoformat()
+
     return doc
 
 
@@ -322,14 +327,16 @@ async def get_direct_messages(
 
 
 
-@router.websocket("/ws/notifications/{user_id}")
-async def websocket_endpoint(websocket: WebSocket, user_id: str):
+@router.websocket("/ws")
+async def websocket_endpoint(
+    websocket: WebSocket,
+    user: dict = Depends(get_ws_user)
+):
     """Establishes a persistent WebSocket connection for real-time notifications."""
-    await manager.connect(websocket, user_id)
+    # user["id"] is now securely verified via the token dependency
+    await manager.connect(websocket, user["id"])
     try:
         while True:
-            # Keep the connection open and wait for incoming messages from the client
-            # (Even if the client only receives, this loop is required to maintain state)
             await websocket.receive_text()
     except WebSocketDisconnect:
-        manager.disconnect(websocket, user_id)
+        manager.disconnect(websocket, user["id"])

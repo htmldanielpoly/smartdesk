@@ -952,7 +952,15 @@ async function viewMessages(v, activeUserId = null) {
         if (!content) return;
         try {
           await api("POST", `/api/forums/messages`, { recipient_id: activeUserId, content });
-          navigate("messages", activeUserId);
+          layout.querySelector("#chat-input").value = "";
+          const isMe = true;
+          historyBox.appendChild(el(`
+            <div class="chat-bubble me">
+              <div class="text">${esc(content)}</div>
+              <div class="time">just now</div>
+            </div>
+            `));
+          historyBox.scrollTop = historyBox.scrollHeight;
         } catch (e) { toast(e.detail, true); }
       };
     } catch (e) { historyBox.innerHTML = `<p class="err-text">${esc(e.detail)}</p>`; }
@@ -970,29 +978,42 @@ function connectWebSocket() {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   wsConnection = new WebSocket(`${protocol}//${window.location.host}/api/forums/ws?token=${state.token}`);
 
+  wsConnection.onopen = () => console.log("[WS] Connection established successfully.");
+
   wsConnection.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
-    const historyBox = document.getElementById("chat-history");
+    console.log("[WS] Payload received:", event.data);
+    try {
+        const msg = JSON.parse(event.data);
+        if (msg.type !== "new_direct_message" || !msg.data) return;
+        const dm = msg.data;
+        const historyBox = document.getElementById("chat-history");
 
-    // If we are actively chatting with the sender, inject the message bubble immediately
-    if (currentView === "messages" && historyBox && window.currentChatId === msg.sender_id) {
-      const emptyPlaceholder = historyBox.querySelector(".empty");
-      if (emptyPlaceholder) emptyPlaceholder.remove();
+        console.log(`[WS] Active Chat: ${window.currentChatId} | Incoming Sender: ${dm.sender_id}`);
 
-      historyBox.appendChild(el(`
-        <div class="chat-bubble them">
-          <div class="text">${esc(msg.content)}</div>
-          <div class="time">just now</div>
-        </div>
-      `));
-      historyBox.scrollTop = historyBox.scrollHeight;
-    } else {
-      // If we are on another tab or chatting with someone else, show a notification toast
-      toast("📩 New direct message received!");
+        if (currentView === "messages" && historyBox && String(window.currentChatId) === String(dm.sender_id)) {
+          const emptyPlaceholder = historyBox.querySelector(".empty");
+          if (emptyPlaceholder) emptyPlaceholder.remove();
+
+          historyBox.appendChild(el(`
+            <div class="chat-bubble them">
+              <div class="text">${esc(dm.content)}</div>
+              <div class="time">just now</div>
+            </div>
+          `));
+          historyBox.scrollTop = historyBox.scrollHeight;
+        } else if (dm.sender_id) {
+          toast("📩 New direct message received!");
+        }
+    } catch (err) {
+        console.error("[WS] Failed to parse message:", err);
     }
-  };
+};
 
-  wsConnection.onclose = () => { wsConnection = null; };
+  wsConnection.onerror = (error) => console.error("[WS] Connection error encountered:", error);
+  wsConnection.onclose = (event) => {
+      console.warn("[WS] Connection closed. Code:", event.code, "Reason:", event.reason);
+      wsConnection = null;
+  };
 }
 
 

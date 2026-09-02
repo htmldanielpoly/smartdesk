@@ -9,7 +9,7 @@ Auth itself is enforced by the forum-service (same JWT secret).
 import httpx
 import asyncio
 import websockets
-from fastapi import APIRouter, Request, status ,WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Request, status ,WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import JSONResponse
 
 
@@ -53,13 +53,23 @@ async def proxy(path: str, request: Request) -> JSONResponse:
 
 
 @router.websocket("/ws")
-async def websocket_proxy(websocket: WebSocket, token: str):
-    await websocket.accept()
-    # Convert the internal HTTP url to a WS url
+async def websocket_proxy(websocket: WebSocket, token: str = Query(None)):
     target_ws_url = f"{settings.forum_service_url.replace('http', 'ws')}/ws?token={token}"
 
+    # Forward Origin for CORS and inject the Authorization header
+    forwarded_headers = {}
+    if token:
+        forwarded_headers["Authorization"] = f"Bearer {token}"
+    if "origin" in websocket.headers:
+        forwarded_headers["Origin"] = websocket.headers["origin"]
+
     try:
-        async with websockets.connect(target_ws_url) as backend_ws:
+        # Connect to the forum-service FIRST
+        async with websockets.connect(target_ws_url, additional_headers=forwarded_headers) as backend_ws:
+
+            # Accept the frontend client ONLY if the backend handshake succeeds
+            await websocket.accept()
+
             async def to_backend():
                 try:
                     while True:
@@ -76,7 +86,14 @@ async def websocket_proxy(websocket: WebSocket, token: str):
                 except websockets.exceptions.ConnectionClosed:
                     pass
 
-            # Run both relay tasks concurrently
             await asyncio.gather(to_backend(), to_frontend())
-    except Exception:
-        await websocket.close()
+
+    except websockets.exceptions.InvalidStatusCode as e:
+        print(f"🔥 WEBSOCKET PROXY CRASH: Upstream rejected with status {e.status_code}")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+    except Exception as e:
+        print(f"🔥 WEBSOCKET PROXY CRASH: {repr(e)}")
+        try:
+            await websocket.close()
+        except RuntimeError:
+            pass
