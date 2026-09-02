@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status,WebSocket, WebSocketDisconnect
+from app.rate_limit import rate_limit, rate_limit_post, rate_limit_message
 
 from app.config import settings
 from app.database import get_db
@@ -100,6 +101,7 @@ async def create_thread(
         slug: str,
         payload: ThreadCreate,
         user: dict = Depends(get_current_user),
+        _: None = Depends(rate_limit_post),
 ):
     """Any authenticated user opens a thread; its body becomes the first post."""
     board = await _get_board_or_404(slug)
@@ -159,6 +161,7 @@ async def create_post(
         thread_id: str,
         payload: PostCreate,
         user: dict = Depends(get_current_user),
+        _: None = Depends(rate_limit_post),
 ):
     thread = await _get_thread_or_404(thread_id)
     if thread.get("locked", False):
@@ -284,7 +287,8 @@ def _serialize_dm(doc: dict) -> dict:
 @router.post("/messages", response_model=DirectMessageOut, status_code=status.HTTP_201_CREATED)
 async def create_direct_message(
         payload: DirectMessageCreate,
-        user: dict = Depends(get_current_user)
+        user: dict = Depends(get_current_user),
+        _: None = Depends(rate_limit_message),
 ):
     """Sends a direct message to another user."""
     doc = {
