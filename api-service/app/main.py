@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.database import connect, disconnect
 from app.routers import admin, ai, auth, comments, forums, incidents, queue, tickets
-from app.services.bootstrap import ensure_admin
+from app.services.bootstrap import ensure_admin , ensure_seed_users
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -16,6 +16,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 async def lifespan(app: FastAPI):
     await connect()
     await ensure_admin()
+    await ensure_seed_users()
     yield
     await disconnect()
 

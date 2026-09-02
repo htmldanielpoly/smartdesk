@@ -39,3 +39,33 @@ async def ensure_admin() -> None:
         upsert=True,
     )
     logger.info("Bootstrap admin ensured: %s", settings.admin_email)
+
+# Seed users — realistic fake accounts for demo and grading
+_SEED_USERS = [
+    {"email": "alice@example.com",   "name": "Alice Chen",    "role": Role.USER.value},
+    {"email": "bob@example.com",     "name": "Bob Martinez",  "role": Role.USER.value},
+    {"email": "carol@example.com",   "name": "Carol Singh",   "role": Role.USER.value},
+    {"email": "david@example.com",   "name": "David Kim",     "role": Role.USER.value},
+    {"email": "eve@example.com",     "name": "Eve Goldstein", "role": Role.USER.value},
+    {"email": "agent1@example.com",  "name": "Agent Sarah",   "role": Role.AGENT.value},
+    {"email": "agent2@example.com",  "name": "Agent Tom",     "role": Role.AGENT.value},
+]
+_SEED_PASSWORD = "password123"
+
+
+async def ensure_seed_users() -> None:
+    """Idempotent: insert demo users on first run. Skips existing emails."""
+    db = get_db()
+    for u in _SEED_USERS:
+        existing = await db.users.find_one({"email": u["email"]})
+        if existing:
+            continue
+        await db.users.insert_one({
+            "email": u["email"],
+            "passwordHash": hash_password(_SEED_PASSWORD),
+            "displayName": u["name"],
+            "role": u["role"],
+            "department": None,
+            "createdAt": datetime.now(UTC),
+        })
+    logger.info("Seed users ensured.")
