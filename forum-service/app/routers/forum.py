@@ -331,6 +331,51 @@ async def get_direct_messages(
 
 
 
+
+
+
+@router.get("/me/summary")
+async def my_summary(user: dict = Depends(get_current_user)):
+    """Returns the current user's threads, posts, and total likes/dislikes."""
+    user_id = user["id"]
+
+    # My threads (non-anonymous only)
+    threads = []
+    async for t in get_db().threads.find(
+        {"authorId": user_id, "isAnonymous": False}
+    ).sort("createdAt", -1).limit(50):
+        threads.append(serialize_thread(t))
+
+    # My posts (non-anonymous, non-deleted)
+    posts = []
+    async for p in get_db().posts.find(
+        {"authorId": user_id, "isAnonymous": False, "deleted": False}
+    ).sort("createdAt", -1).limit(50):
+        posts.append(serialize_post(p))
+
+    # Total likes and dislikes across all threads and posts
+    total_likes = sum(len(t["likes"]) for t in threads) + sum(len(p["likes"]) for p in posts)
+    total_dislikes = sum(len(t["dislikes"]) for t in threads) + sum(len(p["dislikes"]) for p in posts)
+
+    return {
+        "threads": threads,
+        "posts": posts,
+        "total_likes": total_likes,
+        "total_dislikes": total_dislikes,
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,

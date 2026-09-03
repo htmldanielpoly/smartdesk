@@ -154,6 +154,7 @@ const NAV = [
   { id: "incidents", label: "Incidents", ico: "⚡", staffOnly: true },
   { id: "forums", label: "Forums", ico: "💬" },
   { id: "messages", label: "Messages", ico: "✉️" }, /* ADDED THIS LINE */
+  { id: "profile", label: "My Profile", ico: "🧑" },
   { id: "admin", label: "Users", ico: "👤", adminOnly: true },
 ];
 let currentView = null;
@@ -180,8 +181,9 @@ function navigate(view, arg) {
   const v = $("#view");
   v.innerHTML = '<div class="spinner"></div>';
   ({ tickets: viewTickets, ticket: viewTicket, newTicket: viewNewTicket,
-     queue: viewQueue, incidents: viewIncidents, forums: viewForums, board: viewBoard,
-     thread: viewThread, admin: viewAdmin, messages: viewMessages })[view](v, arg); // ADDED messages: viewMessages
+   queue: viewQueue, incidents: viewIncidents, forums: viewForums, board: viewBoard,
+   thread: viewThread, admin: viewAdmin, messages: viewMessages,
+   profile: viewProfile })[view](v, arg);
 }
 
 function backBtn(label, view, arg) {
@@ -1015,6 +1017,67 @@ function connectWebSocket() {
       wsConnection = null;
   };
 }
+
+
+
+
+/* ---------- My Profile ---------- */
+async function viewProfile(v) {
+  v.innerHTML = '<div class="spinner"></div>';
+  let data;
+  try { data = await api("GET", "/api/forums/me/summary"); }
+  catch (e) { return renderError(v, e); }
+
+  v.innerHTML = "";
+  v.appendChild(el(`<div class="page-head"><h2>My Profile</h2></div>`));
+
+  // Stats row
+  const stats = el('<div class="stats"></div>');
+  stats.appendChild(el(`<div class="stat"><div class="n">${data.threads.length}</div><div class="l">Threads</div></div>`));
+  stats.appendChild(el(`<div class="stat"><div class="n">${data.posts.length}</div><div class="l">Replies</div></div>`));
+  stats.appendChild(el(`<div class="stat"><div class="n" style="color:var(--success)">👍 ${data.total_likes}</div><div class="l">Total likes</div></div>`));
+  stats.appendChild(el(`<div class="stat"><div class="n" style="color:var(--danger)">👎 ${data.total_dislikes}</div><div class="l">Total dislikes</div></div>`));
+  v.appendChild(stats);
+
+  // My threads
+  if (data.threads.length) {
+    v.appendChild(el(`<div class="page-head" style="margin-top:24px"><h3>My Threads</h3></div>`));
+    const list = el('<div class="list"></div>');
+    for (const t of data.threads) {
+      const row = el(`<div class="item">
+        <div class="grow">
+          <div class="title">${esc(t.title)}</div>
+          <div class="sub">${t.board_slug} · ${t.post_count} post${t.post_count === 1 ? "" : "s"} · 👍 ${t.likes.length} 👎 ${t.dislikes.length}</div>
+        </div>→
+      </div>`);
+      row.onclick = () => navigate("thread", t.id);
+      list.appendChild(row);
+    }
+    v.appendChild(list);
+  }
+
+  // My replies
+  if (data.posts.length) {
+    v.appendChild(el(`<div class="page-head" style="margin-top:24px"><h3>My Replies</h3></div>`));
+    const list = el('<div class="list"></div>');
+    for (const p of data.posts) {
+      const row = el(`<div class="item">
+        <div class="grow">
+          <div class="title" style="font-size:13px">${esc(p.body.slice(0, 120))}${p.body.length > 120 ? "…" : ""}</div>
+          <div class="sub">in thread · ${timeAgo(p.created_at)} · 👍 ${p.likes.length} 👎 ${p.dislikes.length}</div>
+        </div>→
+      </div>`);
+      row.onclick = () => navigate("thread", p.thread_id);
+      list.appendChild(row);
+    }
+    v.appendChild(list);
+  }
+
+  if (!data.threads.length && !data.posts.length) {
+    v.appendChild(el('<div class="empty"><div class="big">🧑</div>You haven\'t posted anything yet.</div>'));
+  }
+}
+
 
 
 
