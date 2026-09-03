@@ -156,7 +156,9 @@ def test_assist_endpoint(monkeypatch):
     r = client.post(
         "/assist",
         json={
-            "question": "VPN will not connect. The corporate VPN client fails to connect since this morning",
+            "question": (
+                "VPN will not connect. The corporate VPN client fails to connect since this morning"
+            ),
             "candidates": [_VPN.model_dump()],
         },
     )

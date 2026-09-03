@@ -110,7 +110,10 @@ def _from_kb(question: str, conversation: list[str]) -> AssistResponse | None:
     kb_text = "\n\n".join(f"[{a['id']}] {a['title']}\n{a['body']}" for a in articles)
 
     convo = "\n".join(conversation) if conversation else "(first message)"
-    user = f"<kb>\n{kb_text}\n</kb>\n\n<question>\n{question}\nEarlier messages:\n{convo}\n</question>"
+    user = (
+        f"<kb>\n{kb_text}\n</kb>\n\n"
+        f"<question>\n{question}\nEarlier messages:\n{convo}\n</question>"
+    )
     data = llm_local.chat_json(_SYSTEM_PROMPT, user, _schema(allowed_ids))
 
     if data is not None:
