@@ -4,7 +4,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application configuration, loaded from environment variables / .env."""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # env_ignore_empty: docker-compose passes unset optional knobs as empty
+    # strings; treat those as "not set" instead of failing validation.
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)
 
     # MongoDB
     mongo_uri: str = "mongodb://localhost:27017"

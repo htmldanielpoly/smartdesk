@@ -2,7 +2,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # env_ignore_empty: docker-compose passes unset optional knobs as empty
+    # strings (LLM_THREADS: ${LLM_THREADS:-}); treat those as "not set".
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)
 
     # --- Local AI (open-weights models served in-process via llama.cpp) ---
     # Set LOCAL_AI_ENABLED=false to run purely on rule-based fallbacks.
