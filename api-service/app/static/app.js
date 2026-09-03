@@ -986,25 +986,31 @@ function connectWebSocket() {
     console.log("[WS] Payload received:", event.data);
     try {
         const msg = JSON.parse(event.data);
-        if (msg.type !== "new_direct_message" || !msg.data) return;
-        const dm = msg.data;
-        const historyBox = document.getElementById("chat-history");
+        if (!msg.type || !msg.data) return;
 
-        console.log(`[WS] Active Chat: ${window.currentChatId} | Incoming Sender: ${dm.sender_id}`);
-
-        if (currentView === "messages" && historyBox && String(window.currentChatId) === String(dm.sender_id)) {
-          const emptyPlaceholder = historyBox.querySelector(".empty");
-          if (emptyPlaceholder) emptyPlaceholder.remove();
-
-          historyBox.appendChild(el(`
-            <div class="chat-bubble them">
-              <div class="text">${esc(dm.content)}</div>
-              <div class="time">just now</div>
-            </div>
-          `));
-          historyBox.scrollTop = historyBox.scrollHeight;
-        } else if (dm.sender_id) {
-          toast("📩 New direct message received!");
+        if (msg.type === "new_direct_message") {
+          const dm = msg.data;
+          const historyBox = document.getElementById("chat-history");
+          console.log(`[WS] Active Chat: ${window.currentChatId} | Incoming Sender: ${dm.sender_id}`);
+          if (currentView === "messages" && historyBox && String(window.currentChatId) === String(dm.sender_id)) {
+            const emptyPlaceholder = historyBox.querySelector(".empty");
+            if (emptyPlaceholder) emptyPlaceholder.remove();
+            historyBox.appendChild(el(`
+              <div class="chat-bubble them">
+                <div class="text">${esc(dm.content)}</div>
+                <div class="time">just now</div>
+              </div>
+            `));
+            historyBox.scrollTop = historyBox.scrollHeight;
+          } else if (dm.sender_id) {
+            toast("📩 New direct message received!");
+          }
+        } else if (msg.type === "like_notification") {
+          const n = msg.data;
+          const action = n.action === "like" ? "👍" : "👎";
+          const kind = n.kind === "thread" ? "your thread" : "your reply";
+          const label = n.title ? `"${n.title.slice(0, 40)}"` : kind;
+          toast(`${action} Someone ${n.action}d ${label}`);
         }
     } catch (err) {
         console.error("[WS] Failed to parse message:", err);

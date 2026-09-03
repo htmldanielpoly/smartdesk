@@ -229,45 +229,88 @@ async def delete_post(post_id: str, user: dict = Depends(get_current_user)):
 
 @router.post("/threads/{thread_id}/like", status_code=status.HTTP_200_OK)
 async def like_thread(thread_id: str, user: dict = Depends(get_current_user)):
-    """Add user to thread likes, remove from dislikes."""
     thread = await _get_thread_or_404(thread_id)
     await get_db().threads.update_one(
         {"_id": thread["_id"]},
         {"$addToSet": {"likes": user["id"]}, "$pull": {"dislikes": user["id"]}}
     )
+    # Notify thread owner if someone else liked it
+    owner_id = thread.get("authorId")
+    if owner_id and owner_id != user["id"] and not thread.get("isAnonymous"):
+        await manager.send_personal_message({
+            "type": "like_notification",
+            "data": {
+                "kind": "thread",
+                "action": "like",
+                "thread_id": thread_id,
+                "title": thread["title"],
+                "by_user": user["id"],
+            }
+        }, owner_id)
     return {"detail": "Thread liked successfully"}
 
 
 @router.post("/threads/{thread_id}/dislike", status_code=status.HTTP_200_OK)
 async def dislike_thread(thread_id: str, user: dict = Depends(get_current_user)):
-    """Add user to thread dislikes, remove from likes."""
     thread = await _get_thread_or_404(thread_id)
     await get_db().threads.update_one(
         {"_id": thread["_id"]},
         {"$addToSet": {"dislikes": user["id"]}, "$pull": {"likes": user["id"]}}
     )
+    owner_id = thread.get("authorId")
+    if owner_id and owner_id != user["id"] and not thread.get("isAnonymous"):
+        await manager.send_personal_message({
+            "type": "like_notification",
+            "data": {
+                "kind": "thread",
+                "action": "dislike",
+                "thread_id": thread_id,
+                "title": thread["title"],
+                "by_user": user["id"],
+            }
+        }, owner_id)
     return {"detail": "Thread disliked successfully"}
 
 
 @router.post("/posts/{post_id}/like", status_code=status.HTTP_200_OK)
 async def like_post(post_id: str, user: dict = Depends(get_current_user)):
-    """Add user to post likes, remove from dislikes."""
     post = await _get_post_or_404(post_id)
     await get_db().posts.update_one(
         {"_id": post["_id"]},
         {"$addToSet": {"likes": user["id"]}, "$pull": {"dislikes": user["id"]}}
     )
+    owner_id = post.get("authorId")
+    if owner_id and owner_id != user["id"] and not post.get("isAnonymous"):
+        await manager.send_personal_message({
+            "type": "like_notification",
+            "data": {
+                "kind": "post",
+                "action": "like",
+                "thread_id": str(post["threadId"]),
+                "by_user": user["id"],
+            }
+        }, owner_id)
     return {"detail": "Post liked successfully"}
 
 
 @router.post("/posts/{post_id}/dislike", status_code=status.HTTP_200_OK)
 async def dislike_post(post_id: str, user: dict = Depends(get_current_user)):
-    """Add user to post dislikes, remove from likes."""
     post = await _get_post_or_404(post_id)
     await get_db().posts.update_one(
         {"_id": post["_id"]},
         {"$addToSet": {"dislikes": user["id"]}, "$pull": {"likes": user["id"]}}
     )
+    owner_id = post.get("authorId")
+    if owner_id and owner_id != user["id"] and not post.get("isAnonymous"):
+        await manager.send_personal_message({
+            "type": "like_notification",
+            "data": {
+                "kind": "post",
+                "action": "dislike",
+                "thread_id": str(post["threadId"]),
+                "by_user": user["id"],
+            }
+        }, owner_id)
     return {"detail": "Post disliked successfully"}
 
 
