@@ -43,6 +43,20 @@ async def duplicates(title: str, description: str, candidates: list[dict]) -> di
     )
 
 
+async def auto_resolve(title: str, description: str, candidates: list[dict]) -> dict | None:
+    """Long-term memory: ask whether the ticket repeats a resolved one.
+
+    ``candidates`` is a list of {ticket_id, title, description, resolution}.
+    Returns {resolved, match, draft_response, threshold, source, flags} or
+    None if the AI service is unavailable (the ticket then simply stays in
+    the agent queue).
+    """
+    return await _post(
+        "/auto-resolve",
+        {"title": title, "description": description, "candidates": candidates},
+    )
+
+
 async def cluster(items: list[dict]) -> dict | None:
     """Group a batch of tickets into incidents via the local embedding model.
 

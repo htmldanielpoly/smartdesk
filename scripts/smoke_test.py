@@ -2,7 +2,8 @@
 
 Exercises the full user journey through the public gateway only:
 register -> ticket -> AI classification -> admin bootstrap -> agent promotion
--> smart queue claim -> copilot -> comments -> status flow -> forums.
+-> smart queue claim -> copilot -> comments -> status flow -> long-term
+memory (an identical ticket is answered by the AI, no agent) -> forums.
 
 Usage:
     python scripts/smoke_test.py [base_url]
@@ -162,6 +163,60 @@ def main():
     status_code, t = call("PATCH", f"/api/tickets/{ticket_id}", token=agent_tok,
                           body={"status": "CLOSED"})
     check("illegal transition rejected", status_code == 400, t)
+
+    # --- long-term memory: an identical ticket is answered without an agent ---
+    status_code, t = call("PATCH", f"/api/tickets/{ticket_id}", token=agent_tok, body={
+        "status": "RESOLVED",
+        "resolution": "Switch the VPN client to TCP mode under Settings > Protocol and reconnect.",
+    })
+    check("agent resolves with a remembered resolution",
+          status_code == 200 and t["status"] == "RESOLVED" and t["resolution"], t)
+
+    status_code, user2 = call("POST", "/api/auth/register", body={
+        "email": f"user2-{RUN_ID}@example.com", "password": "password123",
+        "display_name": "Smoke User Two",
+    })
+    check("register second user", status_code == 201, user2)
+    user2_tok = user2["access_token"]
+
+    status_code, repeat = call("POST", "/api/tickets", token=user2_tok, body={
+        "title": "VPN will not connect",
+        "description": "The corporate VPN client fails to connect since this morning, help ASAP",
+    })
+    check("second user submits the exact same problem",
+          status_code == 201 and repeat["status"] == "OPEN", repeat)
+    repeat_id = repeat["id"]
+
+    deadline = time.time() + 120
+    while time.time() < deadline:
+        status_code, repeat = call("GET", f"/api/tickets/{repeat_id}", token=user2_tok)
+        if repeat["status"] != "OPEN":
+            break
+        time.sleep(2)
+    check("AI answered the repeat ticket itself (no agent in the loop)",
+          repeat["status"] == "RESOLVED" and repeat["auto_resolved"]
+          and repeat["auto_resolved"]["source_ticket_id"] == ticket_id, repeat)
+    print(f"     -> auto-resolved via {repeat['auto_resolved']['source']} "
+          f"at {repeat['auto_resolved']['similarity']:.3f} similarity")
+
+    status_code, replies = call("GET", f"/api/tickets/{repeat_id}/comments", token=user2_tok)
+    check("customer received the remembered solution from the AI",
+          status_code == 200 and any(
+              c["author_type"] == "ai" and "TCP mode" in c["body"] for c in replies
+          ), replies)
+
+    status_code, queue = call("GET", "/api/queue", token=agent_tok)
+    check("auto-resolved ticket bypassed the agent queue",
+          status_code == 200 and all(q["id"] != repeat_id for q in queue), queue)
+
+    status_code, reopened = call("PATCH", f"/api/tickets/{repeat_id}", token=user2_tok,
+                                 body={"status": "IN_PROGRESS"})
+    check("customer can reopen an AI answer", status_code == 200
+          and reopened["status"] == "IN_PROGRESS"
+          and reopened["auto_resolved"]["reopened_at"], reopened)
+    status_code, queue = call("GET", "/api/queue", token=agent_tok)
+    check("reopened ticket is back in the agent queue",
+          any(q["id"] == repeat_id for q in queue), queue)
 
     # --- forums (proxied through the gateway) ---
     status_code, boards = call("GET", "/api/forums/boards", token=user_tok)

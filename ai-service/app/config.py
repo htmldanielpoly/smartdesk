@@ -52,6 +52,18 @@ class Settings(BaseSettings):
     duplicate_fallback_threshold: float = 0.3
     duplicate_max_results: int = 5
 
+    # --- Long-term memory: automated resolution of exact duplicates ---
+    # When a new ticket is (near-)identical to a ticket that was already
+    # resolved, the AI answers it itself with the stored resolution, with no
+    # human in the loop. Deliberately far stricter than duplicate *detection*
+    # (which only flags candidates to an agent): this path acts autonomously.
+    auto_resolve_enabled: bool = True
+    # Cosine similarity (embedding path) a resolved ticket must reach.
+    auto_resolve_similarity_threshold: float = 0.95
+    # Jaccard token-overlap threshold for the lexical fallback (no model).
+    # Only near-verbatim re-submissions score this high lexically.
+    auto_resolve_fallback_threshold: float = 0.90
+
     # --- Incident clustering thresholds ---
     # Cosine similarity (embedding path) above which two tickets belong to the
     # same incident. Looser than duplicate detection: an incident groups related

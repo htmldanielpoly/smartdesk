@@ -1,5 +1,9 @@
 """Duplicate detection: local embeddings + cosine similarity, with a
-token-overlap (Jaccard) fallback when the embedding model is unavailable."""
+token-overlap (Jaccard) fallback when the embedding model is unavailable.
+
+``similarities`` is the shared scoring primitive: ``find`` ranks candidates
+for the agent-facing duplicate finder, and ``memory.auto_resolve`` reuses the
+same scores under a much stricter threshold."""
 import re
 
 import numpy as np
@@ -26,6 +30,27 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / denom) if denom else 0.0
 
 
+def similarities(query_text: str, cand_texts: list[str]) -> tuple[list[float], str]:
+    """Score ``query_text`` against every candidate text.
+
+    Returns ``(scores, source)`` where ``source`` is ``"local"`` (cosine over
+    local embeddings) or ``"fallback"`` (lexical Jaccard overlap). The two
+    paths score on different scales, so callers pick their threshold
+    according to ``source``.
+    """
+    if not cand_texts:
+        return [], "fallback"
+
+    embeddings = llm_local.embed([query_text, *cand_texts])
+    if embeddings is not None:
+        q = np.asarray(embeddings[0], dtype=np.float32)
+        scores = [_cosine(q, np.asarray(emb, dtype=np.float32)) for emb in embeddings[1:]]
+        return scores, "local"
+
+    q_tokens = _tokens(query_text)
+    return [_jaccard(q_tokens, _tokens(text)) for text in cand_texts], "fallback"
+
+
 def _rank(
     scored: list[tuple[str, str, float]], source: str, threshold: float
 ) -> DuplicatesResponse:
@@ -45,19 +70,14 @@ def find(req: DuplicatesRequest) -> DuplicatesResponse:
     query_text = f"{req.title}. {req.description}"
     cand_texts = [f"{c.title}. {c.description}" for c in req.candidates]
 
-    embeddings = llm_local.embed([query_text, *cand_texts])
-    if embeddings is not None:
-        q = np.asarray(embeddings[0], dtype=np.float32)
-        scored = [
-            (c.ticket_id, c.title, _cosine(q, np.asarray(emb, dtype=np.float32)))
-            for c, emb in zip(req.candidates, embeddings[1:], strict=False)
-        ]
-        return _rank(scored, "local", settings.duplicate_similarity_threshold)
-
-    # Fallback: lexical token overlap.
-    q_tokens = _tokens(query_text)
+    scores, source = similarities(query_text, cand_texts)
     scored = [
-        (c.ticket_id, c.title, _jaccard(q_tokens, _tokens(text)))
-        for c, text in zip(req.candidates, cand_texts, strict=False)
+        (c.ticket_id, c.title, score)
+        for c, score in zip(req.candidates, scores, strict=True)
     ]
-    return _rank(scored, "fallback", settings.duplicate_fallback_threshold)
+    threshold = (
+        settings.duplicate_similarity_threshold
+        if source == "local"
+        else settings.duplicate_fallback_threshold
+    )
+    return _rank(scored, source, threshold)

@@ -26,6 +26,18 @@ class Settings(BaseSettings):
     ai_service_url: str = "http://localhost:8000"
     ai_timeout_seconds: float = 60.0
 
+    # Long-term memory: when a new ticket repeats an already-resolved one
+    # (similarity decided by the AI service, cosine >= 0.95 by default) the AI
+    # answers it with the stored resolution and takes it out of the agent
+    # queue. Disable to always route every ticket to a human.
+    auto_resolve_enabled: bool = True
+    # How many recently resolved tickets (with a stored resolution) form the
+    # memory that a new ticket is compared against.
+    auto_resolve_candidate_limit: int = 300
+    # RESOLVED (default) lets the customer confirm or reopen; CLOSED closes
+    # the ticket outright (the customer can still reopen it).
+    auto_resolve_close_ticket: bool = False
+
     # Forum service (internal), proxied through this gateway.
     forum_service_url: str = "http://localhost:8001"
     forum_timeout_seconds: float = 10.0

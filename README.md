@@ -3,9 +3,11 @@
 SmartDesk is a web-based, AI-powered support ticket management system. Users
 submit support tickets, track their status, discuss issues on per-department
 forums, and communicate with support agents. AI assists agents with ticket
-classification, drafting grounded responses, and spotting duplicate incidents —
-and it all runs **locally, on open-weights models, with no API keys** and no
-data leaving the machine. AI never blocks the core workflow.
+classification, drafting grounded responses, and spotting duplicate incidents,
+and it **remembers resolved tickets**: when a client submits the exact same
+problem another client already had solved, the AI answers it itself with no
+agent in the loop. It all runs **locally, on open-weights models, with no API
+keys** and no data leaving the machine. AI never blocks the core workflow.
 
 ## Architecture
 
@@ -92,6 +94,42 @@ Defense in depth, tested by a dedicated guardrail test suite
 5. **The model never decides alone** — departments are derived server-side
    from the category; all labels are whitelist-validated again after decoding.
 
+## Long-term memory — repeat tickets are answered by the AI itself
+
+Once an agent has resolved a ticket, SmartDesk remembers the answer. When a
+client later opens a ticket describing the **same problem**, the AI answers it
+on its own, with no human in the loop, and the ticket never enters the agent
+queue (`api-service/app/services/memory.py`, `ai-service/app/services/memory.py`):
+
+1. **Memory** — every resolved ticket carries a `resolution`: snapshotted from
+   the agent's last public reply when the ticket is resolved, from a public
+   staff reply posted after resolving, or set explicitly (staff-only
+   `PATCH /api/tickets/{id}` `resolution`; also editable in the UI).
+2. **Match** — right after a ticket is created (in the background, before
+   classification) the api-service offers the recently resolved tickets to
+   `POST /auto-resolve` on the AI service, which embeds them with the local
+   MiniLM model and takes the best cosine match. The bar is deliberately
+   strict: **≥ 0.95** by default (`AUTO_RESOLVE_SIMILARITY_THRESHOLD`) versus
+   0.55 for merely *flagging* duplicates to an agent, so paraphrases still go
+   to a human. Without the model, the lexical fallback needs a near-verbatim
+   repeat (Jaccard ≥ 0.90).
+3. **Answer** — on a match the ticket is atomically taken out of the queue
+   (only if no agent has claimed it meanwhile; a human always wins the race),
+   an AI-authored reply containing the stored resolution is posted, the
+   ticket is marked `RESOLVED` (`AUTO_RESOLVE_CLOSE_TICKET=true` closes it
+   outright) with an audit trail (`auto_resolved`: source ticket, similarity,
+   path) and an activity-log entry with no actor. The answered ticket becomes
+   memory too.
+4. **Human override** — the customer sees the reply and a *This solved it /
+   Didn't help* choice; reopening sends the ticket to the agent queue and
+   whatever the agent then resolves it with replaces the remembered answer.
+
+Safety: the reply reuses the human-written resolution verbatim (nothing is
+generated, so nothing can be hallucinated), tickets that trip the
+prompt-injection detector are never auto-answered, and the whole path is
+best-effort: if the AI service is down the ticket simply waits for an agent.
+`AUTO_RESOLVE_ENABLED=false` turns the feature off.
+
 ## Smart ticket queueing
 
 Agents work from a scored queue instead of cherry-picking
@@ -163,7 +201,9 @@ python scripts/smoke_test.py
 
 It exercises the full journey through the public gateway: register → ticket →
 async AI classification → injection attempt → agent promotion → queue claim →
-copilot → comments → status machine → forums. CI runs the same script.
+copilot → comments → status machine → long-term memory (a second user's
+identical ticket is answered by the AI, bypasses the queue, can be reopened) →
+forums. CI runs the same script.
 
 ## Quick start (local, per service)
 
@@ -184,8 +224,8 @@ rule-based fallbacks unless you also `pip install -r requirements-llm.txt`
 ## Running tests
 
 ```bash
-cd api-service   && pip install -r requirements-dev.txt && pytest   # 39 tests
-cd ai-service    && pip install -r requirements-dev.txt && pytest   # 31 tests
+cd api-service   && pip install -r requirements-dev.txt && pytest   # 58 tests
+cd ai-service    && pip install -r requirements-dev.txt && pytest   # 46 tests
 cd forum-service && pip install -r requirements-dev.txt && pytest   # 14 tests
 ```
 
@@ -233,7 +273,7 @@ GitHub Actions (`.github/workflows/ci.yml`):
 | Area | Endpoints |
 |---|---|
 | Auth | `POST /api/auth/register`, `POST /api/auth/login` |
-| Tickets | `POST/GET /api/tickets`, `GET/PATCH /api/tickets/{id}`, `POST /api/tickets/{id}/assign` |
+| Tickets | `POST/GET /api/tickets`, `GET/PATCH /api/tickets/{id}` (staff: `resolution`), `POST /api/tickets/{id}/assign` |
 | Comments | `GET/POST /api/tickets/{id}/comments` |
 | AI | `POST /api/tickets/{id}/ai/copilot`, `GET /api/tickets/{id}/ai/duplicates` |
 | Queue | `GET /api/queue`, `GET /api/queue/stats`, `POST /api/queue/claim` |
@@ -259,7 +299,7 @@ smartdesk/
 │   ├── app/{routers,services,schemas,models}        forum proxy, admin
 │   └── app/static/            the Freshdesk-style web UI (served at /)
 ├── ai-service/                local LLM: classify, copilot (KB-grounded),
-│   └── app/{routers,services,data}                  duplicates, guardrails
+│   └── app/{routers,services,data}                  duplicates, long-term memory, guardrails
 └── forum-service/             per-department boards, threads, posts
     └── app/routers
 ```

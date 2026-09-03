@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 
 from bson import ObjectId
@@ -8,10 +9,14 @@ from app.deps import get_current_user, require_roles
 from app.models.enums import Role, TicketStatus, can_transition
 from app.rate_limit import rate_limit
 from app.schemas.ticket import AssignRequest, TicketCreate, TicketOut, TicketUpdate
-from app.services import activity, ai_client
+from app.services import activity, ai_client, memory
 from app.services.serializers import serialize_ticket
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/tickets", tags=["tickets"])
+
+_DONE = {TicketStatus.RESOLVED, TicketStatus.CLOSED}
 
 
 def _oid(ticket_id: str) -> ObjectId:
@@ -40,11 +45,30 @@ async def _classify_in_background(ticket_id: ObjectId, title: str, description: 
     ticket immediately with aiSuggested.status == "pending" and the suggestion
     lands on the document when ready ("ok") or not ("unavailable").
     """
-    ai = await ai_client.classify(title, description)
+    try:
+        ai = await ai_client.classify(title, description)
+    except Exception:  # noqa: BLE001 - never leave a ticket stuck at "pending"
+        logger.exception("Classification of ticket %s crashed", ticket_id)
+        ai = None
     suggestion = {**ai, "status": "ok"} if ai else {"status": "unavailable"}
     await get_db().tickets.update_one(
         {"_id": ticket_id}, {"$set": {"aiSuggested": suggestion}}
     )
+
+
+async def _process_new_ticket(ticket_id: ObjectId, title: str, description: str) -> None:
+    """All AI work for a fresh ticket, after the response is sent.
+
+    Long-term memory runs first (embeddings are cheap, so an exact repeat of
+    a resolved ticket is answered within seconds and never reaches the
+    queue); classification follows. Each step is independent and
+    best-effort.
+    """
+    try:
+        await memory.try_auto_resolve(ticket_id)
+    except Exception:  # noqa: BLE001 - a failure here just leaves the ticket for a human
+        logger.exception("Auto-resolve of ticket %s crashed", ticket_id)
+    await _classify_in_background(ticket_id, title, description)
 
 
 @router.post("", response_model=TicketOut, status_code=status.HTTP_201_CREATED)
@@ -64,6 +88,7 @@ async def create_ticket(
         "category": None,
         "priority": None,
         "department": None,
+        "resolution": None,
         "aiSuggested": {"status": "pending"},
         "createdAt": now,
         "updatedAt": now,
@@ -73,7 +98,7 @@ async def create_ticket(
 
     # Never block ticket creation on AI availability or speed.
     background_tasks.add_task(
-        _classify_in_background, result.inserted_id, payload.title, payload.description
+        _process_new_ticket, result.inserted_id, payload.title, payload.description
     )
 
     await activity.log(result.inserted_id, user["_id"], "ticket_created")
@@ -119,7 +144,8 @@ async def update_ticket(
     if payload.description is not None:
         updates["description"] = payload.description
 
-    if any(v is not None for v in (payload.category, payload.priority, payload.department)):
+    staff_fields = (payload.category, payload.priority, payload.department, payload.resolution)
+    if any(v is not None for v in staff_fields):
         if not is_staff:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -129,6 +155,9 @@ async def update_ticket(
             value = getattr(payload, field)
             if value is not None:
                 updates[field] = value
+        if payload.resolution is not None:
+            # The remembered answer, reused by the AI for identical tickets.
+            updates["resolution"] = payload.resolution.strip()
 
     if payload.status is not None:
         current = TicketStatus(ticket["status"])
@@ -142,6 +171,30 @@ async def update_ticket(
             ticket["_id"], user["_id"], "status_changed",
             **{"from": current.value, "to": payload.status.value},
         )
+
+        # Resolving: remember the agent's final public reply as the resolution
+        # (long-term memory) unless one was given explicitly.
+        if (
+            is_staff
+            and payload.status in _DONE
+            and current not in _DONE
+            and "resolution" not in updates
+        ):
+            snapshot = await memory.latest_staff_reply(ticket["_id"])
+            if snapshot:
+                updates["resolution"] = snapshot
+
+        # Reopening an AI-answered ticket: the remembered answer did not help.
+        # Keep the audit trail but mark it, so the ticket reads as "back with
+        # a human" and the next resolution is recorded afresh.
+        auto = ticket.get("autoResolved")
+        reopening = current in _DONE and payload.status not in _DONE
+        if reopening and auto and not auto.get("reopenedAt"):
+            updates["autoResolved.reopenedAt"] = datetime.now(UTC)
+            await activity.log(
+                ticket["_id"], user["_id"], "auto_resolution_rejected",
+                source_ticket=str(auto.get("sourceTicketId")),
+            )
 
     if updates:
         updates["updatedAt"] = datetime.now(UTC)

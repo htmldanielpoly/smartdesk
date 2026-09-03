@@ -40,5 +40,6 @@ async def _ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await db.users.create_index("email", unique=True)
     await db.tickets.create_index("createdBy")
     await db.tickets.create_index("assignedAgent")
+    await db.tickets.create_index("status")  # queue + long-term memory lookups
     await db.comments.create_index("ticketId")
     await db.activity_log.create_index("ticketId")

@@ -5,12 +5,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.database import get_db
 from app.deps import get_current_user
-from app.models.enums import Role
+from app.models.enums import Role, TicketStatus
 from app.schemas.comment import CommentCreate, CommentOut
 from app.services import activity
 from app.services.serializers import serialize_comment
 
 router = APIRouter(prefix="/api/tickets/{ticket_id}/comments", tags=["comments"])
+
+_DONE = {TicketStatus.RESOLVED.value, TicketStatus.CLOSED.value}
 
 
 async def _load_ticket(ticket_id: str) -> dict:
@@ -53,14 +55,24 @@ async def add_comment(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     internal = payload.internal and _is_staff(user)  # only staff may post internal notes
+    now = datetime.now(UTC)
     doc = {
         "ticketId": ticket["_id"],
         "authorId": user["_id"],
+        "authorType": "user",
         "body": payload.body,
         "internal": internal,
-        "createdAt": datetime.now(UTC),
+        "createdAt": now,
     }
     result = await get_db().comments.insert_one(doc)
     doc["_id"] = result.inserted_id
     await activity.log(ticket["_id"], user["_id"], "comment_added")
+
+    # A public staff reply on an already-resolved ticket is (the latest
+    # version of) its resolution — remember it for identical future tickets.
+    if _is_staff(user) and not internal and ticket["status"] in _DONE:
+        await get_db().tickets.update_one(
+            {"_id": ticket["_id"]},
+            {"$set": {"resolution": payload.body.strip(), "updatedAt": now}},
+        )
     return serialize_comment(doc)

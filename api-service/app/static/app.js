@@ -211,6 +211,7 @@ async function viewTickets(v) {
         <div class="title">${esc(t.title)}</div>
         <div class="sub">#${t.id.slice(-6)} · ${esc(t.category || t.ai_suggested?.category || "unclassified")} · opened ${timeAgo(t.created_at)}</div>
       </div>
+      ${t.auto_resolved && !t.auto_resolved.reopened_at ? '<span class="badge ai" title="Answered by the AI from a previously resolved ticket">🧠 AI answered</span>' : ""}
       ${pr ? `<span class="badge ${pr}">${pr}</span>` : ""}
       <span class="badge ${t.status}">${t.status.replace("_", " ")}</span>
     </div>`);
@@ -272,6 +273,9 @@ async function viewTicket(v, id) {
     <div style="white-space:pre-wrap">${esc(t.description)}</div>
   </div>`));
 
+  // Long-term memory: this ticket was answered by the AI from a resolved one.
+  if (t.auto_resolved) main.appendChild(memoryCard(t));
+
   // AI copilot / duplicates (staff only)
   if (isStaff()) main.appendChild(copilotCard(t.id));
 
@@ -308,12 +312,47 @@ function renderComments(box, comments) {
   box.innerHTML = "";
   if (!comments.length) { box.appendChild(el('<p class="muted">No replies yet.</p>')); return; }
   for (const c of comments) {
-    const me = c.author_id === state.userId;
-    box.appendChild(el(`<div class="comment ${c.internal ? "internal" : ""}">
-      <div class="head"><span>${me ? "You" : c.author_id.slice(-6)}${c.internal ? " · internal note" : ""}</span><span>${timeAgo(c.created_at)}</span></div>
+    const isAi = c.author_type === "ai";
+    const me = !isAi && c.author_id === state.userId;
+    const who = isAi ? "🤖 SmartDesk AI · answered from memory" : me ? "You" : String(c.author_id || "").slice(-6);
+    box.appendChild(el(`<div class="comment ${c.internal ? "internal" : ""} ${isAi ? "ai" : ""}">
+      <div class="head"><span>${who}${c.internal ? " · internal note" : ""}</span><span>${timeAgo(c.created_at)}</span></div>
       <div class="body">${esc(c.body)}</div>
     </div>`));
   }
+}
+
+function memoryCard(t) {
+  const a = t.auto_resolved;
+  const pct = Math.round((a.similarity || 0) * 100);
+  const reopened = !!a.reopened_at;
+  const card = el(`<div class="card card-pad memory-box">
+    <h3>🧠 ${reopened ? "AI answer reopened" : "Answered from long-term memory"}
+      <span class="badge soft">${a.source === "local" ? "embedding model" : "lexical fallback"} · ${pct}% match</span></h3>
+    <p class="muted">${reopened
+      ? "The customer said the remembered solution didn't help — this ticket is back with a human agent."
+      : "This ticket is identical to one an agent already resolved, so SmartDesk AI replied with that solution itself — no agent in the loop, and it never entered the queue."}</p>
+  </div>`);
+  if (isStaff()) {
+    const link = el(`<a href="#" style="font-size:13px;display:inline-block;margin-top:8px">View the original ticket #${esc(String(a.source_ticket_id).slice(-6))} →</a>`);
+    link.onclick = (e) => { e.preventDefault(); navigate("ticket", a.source_ticket_id); };
+    card.appendChild(link);
+  }
+  if (!reopened && t.status === "RESOLVED" && !isStaff()) {
+    const row = el(`<div class="row" style="gap:8px;margin-top:12px">
+      <button class="btn sm" id="mem-ok">✔ This solved it</button>
+      <button class="btn ghost sm" id="mem-no">↩ Didn't help — talk to an agent</button>
+    </div>`);
+    row.querySelector("#mem-ok").onclick = () => setStatus(t.id, "CLOSED", "Glad it helped — ticket closed.");
+    row.querySelector("#mem-no").onclick = () => setStatus(t.id, "IN_PROGRESS", "Reopened — an agent will take over.");
+    card.appendChild(row);
+  }
+  return card;
+}
+
+async function setStatus(id, s, msg) {
+  try { await api("PATCH", `/api/tickets/${id}`, { status: s }); toast(msg); navigate("ticket", id); }
+  catch (e) { toast(e.detail, true); }
 }
 
 function ticketMetaCard(t) {
@@ -326,6 +365,7 @@ function ticketMetaCard(t) {
   list.appendChild(el(`<div><div class="k">Category</div><div class="v">${esc(cat || "—")}</div></div>`));
   list.appendChild(el(`<div><div class="k">Department</div><div class="v">${esc(t.department || t.ai_suggested?.department || "—")}</div></div>`));
   list.appendChild(el(`<div><div class="k">Assigned</div><div class="v">${t.assigned_agent ? t.assigned_agent.slice(-6) : "Unassigned"}</div></div>`));
+  if (t.resolution && !isStaff()) list.appendChild(el(`<div><div class="k">Resolution</div><div class="resolution-box">${esc(t.resolution)}</div></div>`));
 
   if (isStaff()) {
     // status transitions
@@ -361,6 +401,21 @@ function ticketMetaCard(t) {
       catch (e) { toast(e.detail, true); }
     };
     list.appendChild(editor);
+    // Resolution editor: the remembered answer (long-term memory). Auto-filled
+    // from the agent's last public reply on resolve; editable here.
+    const res = el(`<div style="margin-top:6px">
+      <div class="k" style="margin-bottom:6px">🧠 Resolution (remembered — identical tickets get this answer automatically)</div>
+      <textarea id="m-resolution" style="min-height:80px" placeholder="Auto-filled from your last public reply when you resolve the ticket, or write it here."></textarea>
+      <button class="btn sm block" id="m-res-save" style="margin-top:8px">Save resolution</button>
+    </div>`);
+    res.querySelector("#m-resolution").value = t.resolution || "";
+    res.querySelector("#m-res-save").onclick = async () => {
+      const resolution = res.querySelector("#m-resolution").value.trim();
+      if (!resolution) { toast("Resolution cannot be empty", true); return; }
+      try { await api("PATCH", `/api/tickets/${t.id}`, { resolution }); toast("Resolution saved — the AI will reuse it for identical tickets"); navigate("ticket", t.id); }
+      catch (e) { toast(e.detail, true); }
+    };
+    list.appendChild(res);
   }
   return card;
 }
@@ -393,7 +448,7 @@ function copilotCard(ticketId) {
       const box = el(`<div class="ai-box"><h4>Possible duplicates <span class="badge soft">${esc(r.source)}</span></h4><div class="stack"></div></div>`);
       const s = box.querySelector(".stack");
       for (const c of r.candidates) {
-        const row = el(`<div class="item" style="cursor:pointer"><div class="grow"><div class="title">${esc(c.title)}</div><div class="sub">${Math.round((c.score || 0) * 100)}% similar</div></div>→</div>`);
+        const row = el(`<div class="item" style="cursor:pointer"><div class="grow"><div class="title">${esc(c.title)}</div><div class="sub">${Math.round((c.similarity || 0) * 100)}% similar</div></div>→</div>`);
         row.onclick = () => navigate("ticket", c.ticket_id);
         s.appendChild(row);
       }
