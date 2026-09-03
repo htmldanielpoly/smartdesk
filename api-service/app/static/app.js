@@ -234,10 +234,56 @@ async function viewTickets(v) {
   v.appendChild(list);
 }
 
+// Customer-facing assistant: answers from long-term memory or the knowledge
+// base, refuses manipulation, and says so when nothing is documented.
+function assistantCard() {
+  const card = el(`<div class="card card-pad assistant" style="max-width:640px;margin-bottom:16px">
+    <div class="page-head" style="margin-bottom:6px"><h3 style="margin:0;font-size:15px">💬 Ask SmartDesk AI first</h3><span class="badge soft">answers only from known solutions</span></div>
+    <p class="muted" style="margin:0 0 10px;font-size:13px">Describe the problem. If another customer already had it solved, or our knowledge base covers it, you get the answer right away — no ticket needed.</p>
+    <div class="chat" id="as-log"></div>
+    <div class="row" style="gap:8px;margin-top:10px;align-items:flex-start">
+      <textarea id="as-q" placeholder="e.g. My VPN will not connect since this morning" style="min-height:56px;flex:1"></textarea>
+      <button class="btn sm" id="as-send">Ask</button>
+    </div>
+  </div>`);
+  const log = card.querySelector("#as-log");
+  const box = card.querySelector("#as-q");
+  const history = [];
+  const api_ = { card, onOpenTicket: null };
+  const SOURCE = { memory: ["ai", "🧠 from a resolved ticket"], kb: ["ai", "📚 knowledge base"], refused: ["threat", "⚠ refused"], no_answer: ["soft", "nothing documented"] };
+  const add = (who, text, meta) => {
+    const b = el(`<div class="bubble ${who}"><div class="who">${who === "me" ? "You" : "SmartDesk AI"} ${meta || ""}</div><div style="white-space:pre-wrap">${esc(text)}</div></div>`);
+    log.appendChild(b); log.scrollTop = log.scrollHeight; return b;
+  };
+  card.querySelector("#as-send").onclick = async () => {
+    const question = box.value.trim();
+    if (!question) return;
+    box.value = "";
+    add("me", question);
+    const pending = add("ai", "Looking for a known solution…");
+    try {
+      const r = await api("POST", "/api/assistant/ask", { question, conversation: history.slice(-6) });
+      const [cls, label] = SOURCE[r.source] || ["soft", r.source];
+      const cites = (r.citations || []).length ? ` · ${r.citations.map(esc).join(", ")}` : "";
+      pending.remove();
+      const b = add("ai", r.answer, `<span class="badge ${cls}">${label}${cites}</span> ${flagBadges(r.flags)}`);
+      history.push(question, r.answer);
+      if (r.suggest_ticket || r.source === "no_answer") {
+        const open = el('<button class="btn ghost sm" style="margin-top:8px">Open a ticket with this</button>');
+        open.onclick = () => api_.onOpenTicket && api_.onOpenTicket(question);
+        b.appendChild(open);
+      }
+    } catch (e) { pending.remove(); add("ai", e.detail || "The assistant is unavailable; please open a ticket."); }
+  };
+  return api_;
+}
+
 async function viewNewTicket(v) {
   v.innerHTML = "";
   v.appendChild(backBtn("Back to tickets", "tickets"));
   v.appendChild(el(`<div class="page-head"><h2>Open a new ticket</h2></div>`));
+  const assistant = assistantCard();
+  v.appendChild(assistant.card);
   const form = el(`<div class="card card-pad" style="max-width:640px">
     <label class="field"><span>Subject</span><input id="nt-title" maxlength="160" placeholder="Short summary of the issue" /></label>
     <label class="field"><span>Description</span><textarea id="nt-desc" maxlength="5000" placeholder="Describe what happened, steps to reproduce, error messages…"></textarea></label>
@@ -246,6 +292,11 @@ async function viewNewTicket(v) {
     <p class="muted" style="margin-bottom:0">🤖 AI will categorize and prioritize your ticket automatically.</p>
   </div>`);
   v.appendChild(form);
+  assistant.onOpenTicket = (question) => {
+    form.querySelector("#nt-title").value = question.slice(0, 160);
+    form.querySelector("#nt-desc").value = question;
+    form.querySelector("#nt-title").focus();
+  };
   form.querySelector("#nt-submit").onclick = async () => {
     const title = form.querySelector("#nt-title").value.trim();
     const description = form.querySelector("#nt-desc").value.trim();

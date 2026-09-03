@@ -79,6 +79,18 @@ async def auto_resolve(title: str, description: str, candidates: list[dict]) -> 
     )
 
 
+async def assist(question: str, conversation: list[str], candidates: list[dict]) -> dict | None:
+    """Customer-facing assistant: answer from memory or the KB, or refuse.
+
+    Returns {answer, source, citations, flags, suggest_ticket, match} or None
+    if the AI service is unavailable.
+    """
+    return await _post(
+        "/assist",
+        {"question": question, "conversation": conversation, "candidates": candidates},
+    )
+
+
 async def cluster(items: list[dict]) -> dict | None:
     """Group a batch of tickets into incidents via the local embedding model.
 

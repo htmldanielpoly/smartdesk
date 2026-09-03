@@ -165,6 +165,26 @@ prompt-injection detector are never auto-answered, and the whole path is
 best-effort: if the AI service is down the ticket simply waits for an agent.
 `AUTO_RESOLVE_ENABLED=false` turns the feature off.
 
+## Customer assistant — talk to the AI before opening a ticket
+
+On the *New ticket* page customers can ask **SmartDesk AI** first
+(`POST /api/assistant/ask`, `ai-service/app/services/assistant.py`). It can
+only say things a human already said, tried in order:
+
+1. **Long-term memory** — a resolved ticket very similar to the question:
+   the reply quotes the agent's stored resolution verbatim.
+2. **Knowledge base** — the most relevant curated articles: with the local
+   model, an answer generated *from those articles only*, grammar-constrained
+   to cite them and checked by the same output guard as the agent copilot;
+   without it, the top article quoted as is.
+3. **Nothing documented** — it says so and offers to open a ticket with the
+   question pre-filled. It never guesses.
+
+Jailbreak and coercion attempts get a fixed refusal, never reach the model,
+and are labelled on screen. The assistant never creates or closes anything;
+the customer decides. Requests are interactive jobs on the AI priority queue
+and count against the per-user write budget.
+
 ## Smart ticket queueing
 
 Agents work from a scored queue instead of cherry-picking
@@ -280,8 +300,8 @@ rule-based fallbacks unless you also `pip install -r requirements-llm.txt`
 ## Running tests
 
 ```bash
-cd api-service   && pip install -r requirements-dev.txt && pytest   # 74 tests
-cd ai-service    && pip install -r requirements-dev.txt && pytest   # 95 tests
+cd api-service   && pip install -r requirements-dev.txt && pytest   # 80 tests
+cd ai-service    && pip install -r requirements-dev.txt && pytest   # 105 tests
 cd forum-service && pip install -r requirements-dev.txt && pytest   # 14 tests
 ```
 
@@ -343,7 +363,7 @@ documented step by step in [`deploy/README.md`](deploy/README.md).
 | Auth | `POST /api/auth/register`, `POST /api/auth/login` |
 | Tickets | `POST/GET /api/tickets`, `GET/PATCH /api/tickets/{id}` (staff: `resolution`), `POST /api/tickets/{id}/assign` |
 | Comments | `GET/POST /api/tickets/{id}/comments` |
-| AI | `POST /api/tickets/{id}/ai/copilot`, `GET /api/tickets/{id}/ai/duplicates`, `GET /api/ai/status` (staff: model state + scheduler stats) |
+| AI | `POST /api/assistant/ask` (customer assistant), `POST /api/tickets/{id}/ai/copilot`, `GET /api/tickets/{id}/ai/duplicates`, `GET /api/ai/status` (staff: model state + scheduler stats) |
 | Queue | `GET /api/queue`, `GET /api/queue/stats`, `POST /api/queue/claim` |
 | Incidents | `GET /api/incidents` (staff: complaints clustered into incidents by the local model) |
 | Forums | `GET /api/forums/boards`, `GET/POST /api/forums/boards/{slug}/threads`, `GET /api/forums/threads/{id}`, `POST /api/forums/threads/{id}/posts`, `PATCH /api/forums/threads/{id}`, `DELETE /api/forums/posts/{id}` |

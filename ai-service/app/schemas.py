@@ -114,3 +114,26 @@ class AutoResolveResponse(BaseModel):
     source: str  # "local" | "fallback"
     # Why nothing was resolved, e.g. ["injection_suspected"], ["below_threshold"].
     flags: list[str] = Field(default_factory=list)
+
+
+# --- Customer-facing assistant --------------------------------------------------
+
+class AssistRequest(BaseModel):
+    # Ticket priority (URGENT/HIGH/MEDIUM/LOW): orders this job on the AI queue.
+    priority: str | None = None
+    question: str
+    conversation: list[str] = Field(default_factory=list)
+    # Long-term memory offered by the gateway: resolved tickets + resolutions.
+    candidates: list[MemoryCandidate] = Field(default_factory=list)
+
+
+class AssistResponse(BaseModel):
+    answer: str
+    # "memory" (a resolved ticket's answer) | "kb" (knowledge base) |
+    # "refused" (jailbreak/coercion) | "no_answer" (nothing documented).
+    source: str
+    citations: list[str] = Field(default_factory=list)
+    flags: list[str] = Field(default_factory=list)
+    # True when the assistant recommends opening a ticket.
+    suggest_ticket: bool = False
+    match: AutoResolveMatch | None = None

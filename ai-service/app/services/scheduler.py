@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 # Lower wins. Interactive kinds (someone is waiting) sit above batch kinds.
 KIND_BASE: dict[str, int] = {
     "copilot": 0,        # an agent is looking at the screen
+    "assistant": 0,      # a customer is chatting and waiting for the reply
     "auto_resolve": 0,   # a customer just submitted and could be answered now
     "duplicates": 10,    # agent-triggered, but a lookup, not a reply
     "classify": 20,      # background, result lands on the ticket later

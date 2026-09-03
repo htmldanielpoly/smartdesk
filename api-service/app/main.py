@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import connect, disconnect
 from app.middleware import BodySizeLimitMiddleware
-from app.routers import admin, ai, auth, comments, forums, incidents, queue, tickets
+from app.routers import admin, ai, assistant, auth, comments, forums, incidents, queue, tickets
 from app.services.bootstrap import ensure_admin
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,7 @@ app.include_router(tickets.router)
 app.include_router(comments.router)
 app.include_router(ai.router)
 app.include_router(ai.status_router)
+app.include_router(assistant.router)
 app.include_router(queue.router)
 app.include_router(incidents.router)
 app.include_router(forums.router)

@@ -80,6 +80,13 @@ class Settings(BaseSettings):
     # Only near-verbatim re-submissions score this high lexically.
     auto_resolve_fallback_threshold: float = 0.90
 
+    # --- Customer-facing assistant (services/assistant.py) ---
+    # Similarity a resolved ticket must reach for the assistant to quote its
+    # resolution. Lower than auto-resolve: here the customer reads and
+    # decides, nothing is closed on their behalf.
+    assistant_memory_threshold: float = 0.80
+    assistant_memory_fallback_threshold: float = 0.60
+
     # --- Incident clustering thresholds ---
     # Cosine similarity (embedding path) above which two tickets belong to the
     # same incident. Looser than duplicate detection: an incident groups related

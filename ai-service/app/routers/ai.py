@@ -6,6 +6,8 @@ as "AI unavailable" and uses its rule-based path, so nothing ever blocks."""
 from fastapi import APIRouter, HTTPException, status
 
 from app.schemas import (
+    AssistRequest,
+    AssistResponse,
     AutoResolveRequest,
     AutoResolveResponse,
     ClassifyRequest,
@@ -17,7 +19,7 @@ from app.schemas import (
     DuplicatesRequest,
     DuplicatesResponse,
 )
-from app.services import classifier, clustering, copilot, duplicates, memory
+from app.services import assistant, classifier, clustering, copilot, duplicates, memory
 from app.services.scheduler import Overloaded, scheduler
 
 router = APIRouter(tags=["ai"])
@@ -58,6 +60,12 @@ async def detect_duplicates(req: DuplicatesRequest):
 async def auto_resolve(req: AutoResolveRequest):
     """Long-term memory: answer a ticket that repeats an already-resolved one."""
     return await _run("auto_resolve", memory.auto_resolve, req, req.priority)
+
+
+@router.post("/assist", response_model=AssistResponse)
+async def assist(req: AssistRequest):
+    """Customer-facing assistant: memory or knowledge base, or an honest no."""
+    return await _run("assistant", assistant.answer, req, req.priority)
 
 
 @router.post("/cluster", response_model=ClusterResponse)
