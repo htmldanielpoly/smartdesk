@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from app.routers import ai
 from app.services import model_manager
+from app.services.scheduler import scheduler
 
 
 @asynccontextmanager
@@ -14,11 +15,14 @@ async def lifespan(app: FastAPI):
     # local LLM once the models are ready.
     loop = asyncio.get_running_loop()
     prepare = loop.run_in_executor(None, model_manager.prepare)
+    # The priority scheduler and its worker pool live on this loop.
+    scheduler.start()
     yield
+    await scheduler.stop()
     prepare.cancel()
 
 
-app = FastAPI(title="SmartDesk AI Service", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="SmartDesk AI Service", version="0.3.0", lifespan=lifespan)
 app.include_router(ai.router)
 
 
@@ -26,5 +30,9 @@ app.include_router(ai.router)
 def health():
     # Reports whether the local models are ready or the service is running
     # on rule-based fallbacks (status: unloaded/downloading/loading/ready/
-    # error/disabled).
-    return {"status": "ok", "local_ai": model_manager.status()}
+    # error/disabled), plus live scheduler statistics.
+    return {
+        "status": "ok",
+        "local_ai": model_manager.status(),
+        "scheduler": scheduler.stats(),
+    }

@@ -10,8 +10,24 @@ from app.schemas.ai import (
     DuplicatesResponse,
 )
 from app.services import ai_client
+from app.services.queueing import effective_priority
 
 router = APIRouter(prefix="/api/tickets/{ticket_id}/ai", tags=["ai"])
+status_router = APIRouter(prefix="/api/ai", tags=["ai"])
+
+
+@status_router.get("/status")
+async def ai_status(user: dict = Depends(require_roles(Role.AGENT, Role.ADMIN))):
+    """Staff-only: local model state and live AI scheduler statistics
+    (queued / running / completed / rejected, per kind), proxied from the
+    internal AI service so the engine is observable from the web UI."""
+    health = await ai_client.health()
+    if health is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI service is unavailable.",
+        )
+    return health
 
 
 async def _load_ticket(ticket_id: str) -> dict:
@@ -35,7 +51,10 @@ async def copilot(
         c["body"]
         async for c in get_db().comments.find({"ticketId": ticket["_id"]}).sort("createdAt", 1)
     ]
-    ai = await ai_client.copilot(ticket["title"], ticket["description"], comments)
+    # The agent is waiting on this: an URGENT ticket's draft jumps the AI queue.
+    ai = await ai_client.copilot(
+        ticket["title"], ticket["description"], comments, priority=effective_priority(ticket)
+    )
     if ai is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -66,7 +85,9 @@ async def duplicates(
         ).limit(200)
     ]
 
-    ai = await ai_client.duplicates(ticket["title"], ticket["description"], candidates)
+    ai = await ai_client.duplicates(
+        ticket["title"], ticket["description"], candidates, priority=effective_priority(ticket)
+    )
     if ai is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

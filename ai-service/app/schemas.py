@@ -2,6 +2,8 @@ from pydantic import BaseModel, Field
 
 
 class ClassifyRequest(BaseModel):
+    # Ticket priority (URGENT/HIGH/MEDIUM/LOW): orders this job on the AI queue.
+    priority: str | None = None
     title: str
     description: str
 
@@ -17,6 +19,8 @@ class ClassifyResponse(BaseModel):
 
 
 class CopilotRequest(BaseModel):
+    # Ticket priority (URGENT/HIGH/MEDIUM/LOW): orders this job on the AI queue.
+    priority: str | None = None
     title: str
     description: str
     conversation: list[str] = Field(default_factory=list)
@@ -38,6 +42,8 @@ class DuplicateInput(BaseModel):
 
 
 class DuplicatesRequest(BaseModel):
+    # Ticket priority (URGENT/HIGH/MEDIUM/LOW): orders this job on the AI queue.
+    priority: str | None = None
     title: str
     description: str
     candidates: list[DuplicateInput] = Field(default_factory=list)
@@ -61,6 +67,8 @@ class ClusterItem(BaseModel):
 
 
 class ClusterRequest(BaseModel):
+    # Ticket priority (URGENT/HIGH/MEDIUM/LOW): orders this job on the AI queue.
+    priority: str | None = None
     items: list[ClusterItem] = Field(default_factory=list)
 
 
@@ -82,6 +90,8 @@ class MemoryCandidate(BaseModel):
 
 
 class AutoResolveRequest(BaseModel):
+    # Ticket priority (URGENT/HIGH/MEDIUM/LOW): orders this job on the AI queue.
+    priority: str | None = None
     title: str
     description: str
     candidates: list[MemoryCandidate] = Field(default_factory=list)

@@ -13,8 +13,12 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-async def _post(path: str, payload: dict) -> dict | None:
+async def _post(path: str, payload: dict, priority: str | None = None) -> dict | None:
+    """POST to the AI service. ``priority`` (the ticket's URGENT/HIGH/MEDIUM/
+    LOW) is passed along so the AI scheduler orders the job accordingly."""
     url = f"{settings.ai_service_url}{path}"
+    if priority:
+        payload = {**payload, "priority": priority}
     try:
         async with httpx.AsyncClient(timeout=settings.ai_timeout_seconds) as client:
             resp = await client.post(url, json=payload)
@@ -25,21 +29,39 @@ async def _post(path: str, payload: dict) -> dict | None:
         return None
 
 
-async def classify(title: str, description: str) -> dict | None:
-    return await _post("/classify", {"title": title, "description": description})
+async def health() -> dict | None:
+    """Model state and live scheduler statistics (``GET /health``)."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{settings.ai_service_url}/health")
+            resp.raise_for_status()
+            return resp.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("AI service health check failed: %s", exc)
+        return None
 
 
-async def copilot(title: str, description: str, conversation: list[str]) -> dict | None:
+async def classify(title: str, description: str, priority: str | None = None) -> dict | None:
+    return await _post("/classify", {"title": title, "description": description}, priority)
+
+
+async def copilot(
+    title: str, description: str, conversation: list[str], priority: str | None = None
+) -> dict | None:
     return await _post(
         "/copilot",
         {"title": title, "description": description, "conversation": conversation},
+        priority,
     )
 
 
-async def duplicates(title: str, description: str, candidates: list[dict]) -> dict | None:
+async def duplicates(
+    title: str, description: str, candidates: list[dict], priority: str | None = None
+) -> dict | None:
     return await _post(
         "/duplicates",
         {"title": title, "description": description, "candidates": candidates},
+        priority,
     )
 
 

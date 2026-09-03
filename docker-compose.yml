@@ -19,6 +19,10 @@ services:
       # to answer a new ticket by itself.
       AUTO_RESOLVE_ENABLED: ${AUTO_RESOLVE_ENABLED:-true}
       AUTO_RESOLVE_SIMILARITY_THRESHOLD: ${AUTO_RESOLVE_SIMILARITY_THRESHOLD:-0.95}
+      # Priority scheduler: worker pool size and queue capacity (see .env.example).
+      AI_WORKERS: ${AI_WORKERS:-4}
+      AI_QUEUE_MAX: ${AI_QUEUE_MAX:-200}
+      LLM_THREADS: ${LLM_THREADS:-}
     volumes:
       # Model files (~450 MB) are downloaded on first start and persist here,
       # so container rebuilds never re-download them.

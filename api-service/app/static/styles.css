@@ -285,3 +285,11 @@ textarea { resize: vertical; min-height: 96px; }
 /* ---------- Guardrail badges ---------- */
 .badge.threat { background: var(--danger-soft); color: var(--danger); }
 .ai-box code { background: #ebe6fb; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+
+/* ---------- AI engine card (queue view) ---------- */
+.engine-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
+.engine-grid .n { font-size: 22px; font-weight: 800; line-height: 1; }
+.engine-grid .n small { font-size: 12px; font-weight: 600; color: var(--text-muted); margin-left: 2px; }
+.engine-grid .l { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+.engine-grid .v { font-size: 13px; font-weight: 600; margin-top: 3px; }
+.engine-grid .span { grid-column: 1 / -1; }

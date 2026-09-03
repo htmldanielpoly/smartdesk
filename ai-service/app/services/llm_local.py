@@ -5,6 +5,13 @@ schema that llama.cpp compiles into a decoding grammar — the model is
 physically unable to emit anything but JSON matching the schema (including
 enum fields, so an invalid ticket category cannot even be sampled).
 
+Concurrency: a llama.cpp model instance is not safe for concurrent calls,
+but the *two* instances are independent. Each has its own lock, so a chat
+completion and an embedding run in parallel on different cores; the
+scheduler (services/scheduler.py) decides which jobs get to run and in what
+order. Embeddings take the lock per text, so a long batch (incident
+clustering of 200 tickets) cannot starve a single high-priority lookup.
+
 Returns None on any failure so callers can fall back to rule-based logic.
 """
 import json
@@ -16,10 +23,8 @@ from app.services import model_manager
 
 logger = logging.getLogger(__name__)
 
-# llama.cpp model instances are not safe for concurrent calls; serialize
-# inference. FastAPI runs sync endpoints in a threadpool, so two requests can
-# reach the model at the same time without this.
-_infer_lock = threading.Lock()
+_chat_lock = threading.Lock()
+_embed_lock = threading.Lock()
 
 
 def chat_json(system: str, user: str, schema: dict) -> dict | None:
@@ -32,7 +37,7 @@ def chat_json(system: str, user: str, schema: dict) -> dict | None:
     if model is None:
         return None
     try:
-        with _infer_lock:
+        with _chat_lock:
             resp = model.create_chat_completion(
                 messages=[
                     {"role": "system", "content": system},
@@ -55,8 +60,11 @@ def embed(texts: list[str]) -> list[list[float]] | None:
     if model is None or not texts:
         return None
     try:
-        with _infer_lock:
-            return [model.embed(t) for t in texts]
+        out: list[list[float]] = []
+        for text in texts:
+            with _embed_lock:  # released between texts: other jobs can interleave
+                out.append(model.embed(text))
+        return out
     except Exception as exc:  # noqa: BLE001
         logger.warning("Local embedding failed: %s", exc)
         return None

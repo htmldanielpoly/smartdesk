@@ -70,6 +70,35 @@ rule-based fallbacks, so the system is always fully functional.
 `GET /health` on the AI service reports the model state
 (`unloaded → downloading → loading → ready`).
 
+## Parallel AI engine: a priority queue of chats
+
+Local inference is CPU-bound and a llama.cpp model is not thread-safe, so
+the AI service schedules its work instead of letting requests race
+(`ai-service/app/services/scheduler.py`):
+
+- **Every request is a job on an `asyncio.PriorityQueue`.** The key is
+  *(job kind + ticket priority, arrival order)*: an URGENT ticket's copilot
+  draft is served before a LOW ticket's classification, and interactive work
+  (an agent or a customer is waiting) beats batch work (incident clustering).
+  The gateway sends each ticket's priority along with the request.
+- **A pool of worker tasks** (`AI_WORKERS`, default 4) pulls jobs and runs
+  each in a thread, so the event loop keeps accepting requests and answering
+  `/health` while a model is busy.
+- **Two models, two locks.** Embeddings and chat completions hold separate
+  locks and run truly in parallel on different cores; embeddings take the
+  lock per text so a 200-ticket clustering batch cannot starve a single
+  lookup. Rule-based fallbacks need no lock at all.
+- **Backpressure.** Beyond `AI_QUEUE_MAX` queued jobs the engine answers
+  `503 Retry-After` immediately, and every job has a timeout (`504`). The
+  gateway treats both as "AI unavailable" and uses its rule-based path, so a
+  burst of clients can never pile up unbounded work or block ticketing.
+- **Observable.** `GET /health` on the AI service (and `GET /api/ai/status`
+  for staff, shown live on the **Queue** page) reports workers, queued,
+  running, completed, rejected and timed-out jobs, average queue wait, and
+  jobs per kind. `python scripts/ai_load_demo.py` fires a burst of mixed-
+  priority tickets and copilot drafts through the gateway and prints the
+  engine's counters as it drains.
+
 ## AI safety: no hallucinations, no jailbreaks
 
 Defense in depth, tested by a dedicated guardrail test suite
@@ -251,8 +280,8 @@ rule-based fallbacks unless you also `pip install -r requirements-llm.txt`
 ## Running tests
 
 ```bash
-cd api-service   && pip install -r requirements-dev.txt && pytest   # 72 tests
-cd ai-service    && pip install -r requirements-dev.txt && pytest   # 84 tests
+cd api-service   && pip install -r requirements-dev.txt && pytest   # 74 tests
+cd ai-service    && pip install -r requirements-dev.txt && pytest   # 95 tests
 cd forum-service && pip install -r requirements-dev.txt && pytest   # 14 tests
 ```
 
@@ -302,7 +331,7 @@ GitHub Actions (`.github/workflows/ci.yml`):
 | Auth | `POST /api/auth/register`, `POST /api/auth/login` |
 | Tickets | `POST/GET /api/tickets`, `GET/PATCH /api/tickets/{id}` (staff: `resolution`), `POST /api/tickets/{id}/assign` |
 | Comments | `GET/POST /api/tickets/{id}/comments` |
-| AI | `POST /api/tickets/{id}/ai/copilot`, `GET /api/tickets/{id}/ai/duplicates` |
+| AI | `POST /api/tickets/{id}/ai/copilot`, `GET /api/tickets/{id}/ai/duplicates`, `GET /api/ai/status` (staff: model state + scheduler stats) |
 | Queue | `GET /api/queue`, `GET /api/queue/stats`, `POST /api/queue/claim` |
 | Incidents | `GET /api/incidents` (staff: complaints clustered into incidents by the local model) |
 | Forums | `GET /api/forums/boards`, `GET/POST /api/forums/boards/{slug}/threads`, `GET /api/forums/threads/{id}`, `POST /api/forums/threads/{id}/posts`, `PATCH /api/forums/threads/{id}`, `DELETE /api/forums/posts/{id}` |

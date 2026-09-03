@@ -33,6 +33,20 @@ class Settings(BaseSettings):
     llm_context_tokens: int = 4096
     llm_max_output_tokens: int = 512
     llm_temperature: float = 0.2
+    # CPU threads per llama.cpp model (None = llama.cpp default, all cores).
+    # With two models running in parallel, half the cores each is a good start.
+    llm_threads: int | None = None
+
+    # --- AI job scheduler (services/scheduler.py) ---
+    # Worker tasks pulling jobs off the priority queue. Rule-based work runs
+    # freely in parallel; model work is serialised per model by its lock, so
+    # more than ~2-4 workers mostly helps fallback/lexical jobs.
+    ai_workers: int = 4
+    # Queue capacity; beyond it new jobs are rejected (503) immediately so the
+    # gateway falls back instead of waiting.
+    ai_queue_max: int = 200
+    # Hard cap on a job's queue wait + run time.
+    ai_job_timeout_seconds: float = 120.0
 
     # --- Knowledge-base grounding (anti-hallucination) ---
     # Copilot answers must be grounded in a KB article at least this similar

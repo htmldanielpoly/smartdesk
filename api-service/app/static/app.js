@@ -473,6 +473,39 @@ function copilotCard(ticketId) {
 }
 
 /* ---------- Queue (staff) ---------- */
+// Live view of the AI engine: model state + the priority scheduler's queue.
+// Polls while the card is on screen; stops as soon as the view changes.
+function aiEngineCard() {
+  const card = el(`<div class="card card-pad engine" style="margin-bottom:20px">
+    <div class="page-head" style="margin-bottom:8px"><h3 style="margin:0;font-size:15px">⚙️ AI engine</h3><span class="badge soft" id="eng-model">…</span></div>
+    <div class="engine-grid" id="eng-grid"><span class="muted">Loading…</span></div>
+  </div>`);
+  const tick = async () => {
+    if (!card.isConnected) return;
+    try {
+      const h = await api("GET", "/api/ai/status");
+      const m = h.local_ai || {}, s = h.scheduler || {};
+      const modelBadge = card.querySelector("#eng-model");
+      modelBadge.textContent = m.status === "ready" ? "local models ready" : `models: ${m.status || "unknown"} · rule-based fallbacks`;
+      modelBadge.className = "badge " + (m.status === "ready" ? "ai" : "soft");
+      const kinds = Object.entries(s.by_kind || {}).map(([k, n]) => `${k} ${n}`).join(" · ") || "—";
+      card.querySelector("#eng-grid").innerHTML = `
+        <div><div class="n">${s.workers ?? "—"}</div><div class="l">parallel workers</div></div>
+        <div><div class="n">${s.queued ?? 0}</div><div class="l">queued (priority order)</div></div>
+        <div><div class="n">${s.running ?? 0}</div><div class="l">running now</div></div>
+        <div><div class="n">${s.completed ?? 0}</div><div class="l">completed</div></div>
+        <div><div class="n">${s.avg_wait_ms ?? 0}<small>ms</small></div><div class="l">avg queue wait</div></div>
+        <div><div class="n" style="color:${(s.rejected || 0) + (s.timed_out || 0) ? "var(--danger)" : "inherit"}">${(s.rejected || 0) + (s.timed_out || 0)}</div><div class="l">rejected / timed out</div></div>
+        <div class="span"><div class="l">jobs by kind</div><div class="v">${esc(kinds)}</div></div>`;
+    } catch (e) {
+      card.querySelector("#eng-grid").innerHTML = `<span class="err-text">${esc(e.detail || "AI service unavailable")}</span>`;
+    }
+    setTimeout(tick, 4000);
+  };
+  tick();
+  return card;
+}
+
 async function viewQueue(v) {
   let queue, stats;
   try { queue = await api("GET", "/api/queue"); stats = await api("GET", "/api/queue/stats"); }
@@ -497,6 +530,7 @@ async function viewQueue(v) {
     if (byP[p]) statRow.appendChild(el(`<div class="stat"><div class="n">${byP[p]}</div><div class="l">${p}</div></div>`));
   }
   v.appendChild(statRow);
+  v.appendChild(aiEngineCard());
 
   if (!queue.length) { v.appendChild(el('<div class="empty"><div class="big">🎉</div>Queue is empty. Nothing waiting!</div>')); return; }
 

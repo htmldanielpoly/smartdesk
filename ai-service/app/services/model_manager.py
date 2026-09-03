@@ -102,16 +102,19 @@ def prepare() -> None:
             # actually runs (tests exercise the fallback paths without it).
             from llama_cpp import Llama
 
+            threads = {"n_threads": settings.llm_threads} if settings.llm_threads else {}
             _chat_model = Llama(
                 model_path=str(chat_path),
                 n_ctx=settings.llm_context_tokens,
                 verbose=False,
+                **threads,
             )
             _embed_model = Llama(
                 model_path=str(embed_path),
                 embedding=True,
                 n_ctx=512,
                 verbose=False,
+                **threads,
             )
             _set_state("ready")
             logger.info("Local models loaded and ready")
