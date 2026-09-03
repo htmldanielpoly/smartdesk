@@ -19,6 +19,10 @@ services:
       # to answer a new ticket by itself.
       AUTO_RESOLVE_ENABLED: ${AUTO_RESOLVE_ENABLED:-true}
       AUTO_RESOLVE_SIMILARITY_THRESHOLD: ${AUTO_RESOLVE_SIMILARITY_THRESHOLD:-0.95}
+      # Priority scheduler: worker pool size and queue capacity (see .env.example).
+      AI_WORKERS: ${AI_WORKERS:-4}
+      AI_QUEUE_MAX: ${AI_QUEUE_MAX:-200}
+      LLM_THREADS: ${LLM_THREADS:-}
     volumes:
       # Model files (~450 MB) are downloaded on first start and persist here,
       # so container rebuilds never re-download them.
@@ -56,9 +60,19 @@ services:
       AUTO_RESOLVE_ENABLED: ${AUTO_RESOLVE_ENABLED:-true}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      # Per-IP request cap. Raise it when seeding the grid demo or load testing
-      # (many requests from one host); default is fine for normal use.
+      # Abuse protection: per-user budgets and a request body cap (see
+      # .env.example). Raise RATE_LIMIT_REQUESTS before seeding the grid demo.
       RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-30}
+      RATE_LIMIT_WRITES: ${RATE_LIMIT_WRITES:-20}
+      MAX_REQUEST_BODY_BYTES: ${MAX_REQUEST_BODY_BYTES:-1048576}
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
+      REQUIRE_STRONG_SECRET: ${REQUIRE_STRONG_SECRET:-false}
+      # Media uploads (images/videos) are streamed to this volume, capped per type.
+      UPLOADS_DIR: /data/uploads
+      MAX_IMAGE_BYTES: ${MAX_IMAGE_BYTES:-5242880}
+      MAX_VIDEO_BYTES: ${MAX_VIDEO_BYTES:-26214400}
+    volumes:
+      - uploads_data:/data/uploads
     ports:
       - "8080:8080"   # The only service exposed to clients.
     networks:
@@ -71,3 +85,4 @@ networks:
 volumes:
   mongo_data:
   ai_models:
+  uploads_data:

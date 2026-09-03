@@ -8,7 +8,10 @@ import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
+from app import rate_limit
+from app.config import settings
 from app.routers import forums
+from app.security import create_access_token
 
 
 class _FakeResponse:
@@ -45,6 +48,7 @@ class _FakeAsyncClient:
 
 @pytest.fixture
 def client(monkeypatch):
+    rate_limit.reset()
     _FakeAsyncClient.captured = {}
     _FakeAsyncClient.response = _FakeResponse(200, {"ok": True})
     _FakeAsyncClient.error = None
@@ -105,3 +109,40 @@ def test_connection_error_yields_503(client):
     r = client.get("/api/forums/boards", headers={"Authorization": "Bearer some-token"})
     assert r.status_code == 503
     assert r.json() == {"detail": "Forum service is unavailable."}
+
+
+# --- abuse protection at the edge --------------------------------------------
+
+def _user_token(n: int) -> str:
+    return create_access_token(f"{n:024x}", "USER")
+
+
+def test_forum_writes_are_throttled_per_user_before_forwarding(client, monkeypatch):
+    monkeypatch.setattr(settings, "rate_limit_writes", 2)
+    alice = {"Authorization": f"Bearer {_user_token(1)}"}
+    bob = {"Authorization": f"Bearer {_user_token(2)}"}
+
+    def post_thread(headers):
+        return client.post(
+            "/api/forums/boards/general/threads",
+            json={"title": "spam", "body": "spam"},
+            headers=headers,
+        )
+
+    assert post_thread(alice).status_code == 200
+    assert post_thread(alice).status_code == 200
+    _FakeAsyncClient.captured = {}
+    blocked = post_thread(alice)
+    assert blocked.status_code == 429
+    assert _FakeAsyncClient.captured == {}  # never reached the forum service
+
+    # A different user behind the same address is unaffected.
+    assert post_thread(bob).status_code == 200
+
+
+def test_forum_reads_use_the_general_budget(client, monkeypatch):
+    monkeypatch.setattr(settings, "rate_limit_writes", 1)
+    monkeypatch.setattr(settings, "rate_limit_requests", 3)
+    alice = {"Authorization": f"Bearer {_user_token(3)}"}
+    codes = [client.get("/api/forums/boards", headers=alice).status_code for _ in range(4)]
+    assert codes == [200, 200, 200, 429]

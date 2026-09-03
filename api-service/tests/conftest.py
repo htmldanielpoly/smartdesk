@@ -34,6 +34,7 @@ def client(db, monkeypatch):
     monkeypatch.setattr(ai_client, "copilot", _none)
     monkeypatch.setattr(ai_client, "duplicates", _none)
     monkeypatch.setattr(ai_client, "auto_resolve", _none)
+    monkeypatch.setattr(ai_client, "assist", _none)
 
     # Not used as a context manager -> app lifespan (real DB connect) is skipped.
     return TestClient(app)

@@ -6,3 +6,5 @@ pydantic[email]==2.10.4
 bcrypt==4.2.1
 pyjwt==2.10.1
 httpx==0.28.1
+# Multipart form parsing for media uploads (POST /api/uploads).
+python-multipart==0.0.20

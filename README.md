@@ -70,6 +70,35 @@ rule-based fallbacks, so the system is always fully functional.
 `GET /health` on the AI service reports the model state
 (`unloaded → downloading → loading → ready`).
 
+## Parallel AI engine: a priority queue of chats
+
+Local inference is CPU-bound and a llama.cpp model is not thread-safe, so
+the AI service schedules its work instead of letting requests race
+(`ai-service/app/services/scheduler.py`):
+
+- **Every request is a job on an `asyncio.PriorityQueue`.** The key is
+  *(job kind + ticket priority, arrival order)*: an URGENT ticket's copilot
+  draft is served before a LOW ticket's classification, and interactive work
+  (an agent or a customer is waiting) beats batch work (incident clustering).
+  The gateway sends each ticket's priority along with the request.
+- **A pool of worker tasks** (`AI_WORKERS`, default 4) pulls jobs and runs
+  each in a thread, so the event loop keeps accepting requests and answering
+  `/health` while a model is busy.
+- **Two models, two locks.** Embeddings and chat completions hold separate
+  locks and run truly in parallel on different cores; embeddings take the
+  lock per text so a 200-ticket clustering batch cannot starve a single
+  lookup. Rule-based fallbacks need no lock at all.
+- **Backpressure.** Beyond `AI_QUEUE_MAX` queued jobs the engine answers
+  `503 Retry-After` immediately, and every job has a timeout (`504`). The
+  gateway treats both as "AI unavailable" and uses its rule-based path, so a
+  burst of clients can never pile up unbounded work or block ticketing.
+- **Observable.** `GET /health` on the AI service (and `GET /api/ai/status`
+  for staff, shown live on the **Queue** page) reports workers, queued,
+  running, completed, rejected and timed-out jobs, average queue wait, and
+  jobs per kind. `python scripts/ai_load_demo.py` fires a burst of mixed-
+  priority tickets and copilot drafts through the gateway and prints the
+  engine's counters as it drains.
+
 ## AI safety: no hallucinations, no jailbreaks
 
 Defense in depth, tested by a dedicated guardrail test suite
@@ -78,10 +107,14 @@ Defense in depth, tested by a dedicated guardrail test suite
 1. **Constrained decoding** — every LLM call is grammar-constrained to a JSON
    schema (llama.cpp compiles it into the sampler). Category/priority are
    *enums in the grammar*: an invalid label cannot even be generated.
-2. **Prompt-injection detection** — tickets matching jailbreak patterns
-   ("ignore previous instructions", persona switches, ...) never reach the
-   model; they are classified by deterministic rules and flagged
-   `injection_suspected`.
+2. **Prompt-injection and coercion detection** — tickets matching jailbreak
+   patterns ("ignore previous instructions", "ignore all rules", DAN and
+   other personas, "pretend to be", fake authority, prompt extraction) or
+   "yes-man" pressure ("admit the problem is with the service", "otherwise a
+   catastrophe will happen", "you must agree with me") never reach the
+   model; they are classified by deterministic rules, never auto-answered
+   from memory, and flagged `injection_suspected` / `coercion_suspected`.
+   The flag is shown on the ticket (⚠ badge) so agents see the attempt.
 3. **Input sanitization** — chat-template control tokens (`<|im_start|>` etc.)
    and control characters are stripped, lengths capped, and ticket text is
    fenced as untrusted data in the prompt.
@@ -89,8 +122,10 @@ Defense in depth, tested by a dedicated guardrail test suite
    curated knowledge base (`ai-service/app/data/kb_articles.json`). If no
    article is similar enough to the ticket, it *refuses to generate* and
    returns a safe template. Citations are grammar-constrained to the retrieved
-   article ids and validated after generation; a draft that cites nothing real
-   or contains a URL not present in the KB is discarded.
+   article ids and validated after generation; a draft that cites nothing real,
+   contains a URL not present in the KB, or **makes a commitment the KB does
+   not back** (a refund, a credit, an admission of fault, "as you demanded")
+   is discarded — the copilot cannot be talked into being a yes-man.
 5. **The model never decides alone** — departments are derived server-side
    from the category; all labels are whitelist-validated again after decoding.
 
@@ -130,6 +165,26 @@ prompt-injection detector are never auto-answered, and the whole path is
 best-effort: if the AI service is down the ticket simply waits for an agent.
 `AUTO_RESOLVE_ENABLED=false` turns the feature off.
 
+## Customer assistant — talk to the AI before opening a ticket
+
+On the *New ticket* page customers can ask **SmartDesk AI** first
+(`POST /api/assistant/ask`, `ai-service/app/services/assistant.py`). It can
+only say things a human already said, tried in order:
+
+1. **Long-term memory** — a resolved ticket very similar to the question:
+   the reply quotes the agent's stored resolution verbatim.
+2. **Knowledge base** — the most relevant curated articles: with the local
+   model, an answer generated *from those articles only*, grammar-constrained
+   to cite them and checked by the same output guard as the agent copilot;
+   without it, the top article quoted as is.
+3. **Nothing documented** — it says so and offers to open a ticket with the
+   question pre-filled. It never guesses.
+
+Jailbreak and coercion attempts get a fixed refusal, never reach the model,
+and are labelled on screen. The assistant never creates or closes anything;
+the customer decides. Requests are interactive jobs on the AI priority queue
+and count against the per-user write budget.
+
 ## Smart ticket queueing
 
 Agents work from a scored queue instead of cherry-picking
@@ -153,6 +208,36 @@ all authenticated users; agents/admins can lock and pin threads; posts are
 soft-deleted. The forum-service is never exposed directly — the api-service
 proxies it under `/api/forums/*` and it validates the same JWTs (shared
 secret, no cross-service user lookup).
+
+## Abuse protection — spam, floods and oversized uploads
+
+The gateway is the only exposed service, so the defences live there
+(`api-service/app/rate_limit.py`, `api-service/app/middleware.py`):
+
+- **Per-user rate limits.** Every metered endpoint has a general budget
+  (`RATE_LIMIT_REQUESTS` per minute); anything that *creates content* — ticket
+  comments, forum threads, posts and messages — has a stricter one
+  (`RATE_LIMIT_WRITES`). Budgets are keyed by the user id in the JWT, not the
+  client address, so one flooding customer cannot lock out everyone behind
+  the same NAT or reverse proxy (and a Locust swarm from one host is metered
+  per virtual user). Unauthenticated calls (register/login) are metered per
+  address. Rejections are `429` with a `Retry-After` header.
+- **Body size cap.** Requests bigger than `MAX_REQUEST_BODY_BYTES` (1 MiB by
+  default; every API body is a small JSON document) are refused with `413`
+  before they are read — declared lengths are rejected outright, chunked
+  streams are cut off the moment they cross the cap.
+- **Media uploads with real limits.** `POST /api/uploads` accepts images
+  (JPEG, PNG, GIF, WebP) and videos (MP4, WebM) for comments, forum posts and
+  messages. The type is decided by the file's magic bytes, never by the
+  client's claim; images are capped at `MAX_IMAGE_BYTES` (5 MiB) and videos
+  at `MAX_VIDEO_BYTES` (25 MiB), enforced *while the file streams to disk*
+  (a 2 GB "video" is cut off at 25 MiB and never touches memory or Mongo,
+  which only stores a few bytes of metadata). Files are served at
+  `/uploads/<random id>` with `nosniff` and immutable caching, and any
+  `media_urls` on content must reference an upload this gateway stored.
+- **Secrets.** The api-service logs a loud warning when it runs with the
+  public example `JWT_SECRET`, and refuses to start with it when
+  `REQUIRE_STRONG_SECRET=true` (the production compose file sets this).
 
 ## Quick start (Docker)
 
@@ -224,8 +309,8 @@ rule-based fallbacks unless you also `pip install -r requirements-llm.txt`
 ## Running tests
 
 ```bash
-cd api-service   && pip install -r requirements-dev.txt && pytest   # 58 tests
-cd ai-service    && pip install -r requirements-dev.txt && pytest   # 46 tests
+cd api-service   && pip install -r requirements-dev.txt && pytest   # 94 tests
+cd ai-service    && pip install -r requirements-dev.txt && pytest   # 107 tests
 cd forum-service && pip install -r requirements-dev.txt && pytest   # 14 tests
 ```
 
@@ -242,7 +327,7 @@ taxonomy and maps each type to concrete tests — see
 each service; the cross-service suite adds:
 
 ```bash
-pytest tests/                              # Security (RBAC, auth-bypass, injection)
+pytest tests/                              # Security (RBAC, auth-bypass, injection, spam, uploads)
                                            #  + System (end-to-end, skips if no stack)
 ```
 
@@ -258,24 +343,37 @@ locust -f tests/Stress_Tests/locustfile.py --host http://localhost:8080
 
 (Apache Bench and the race-condition concurrency test are covered there too.)
 
-## CI/CD
+## CI/CD and deployment
 
-GitHub Actions (`.github/workflows/ci.yml`):
+GitHub Actions (`.github/workflows/ci.yml`) runs the whole chain on every
+push to `main` (and the first two jobs on every pull request):
 
 1. **lint-test** — ruff + pytest for each service, in parallel.
 2. **docker-smoke** — builds the real images, boots the whole stack with
-   docker compose and runs `scripts/smoke_test.py` against the public gateway.
+   docker compose and runs `scripts/smoke_test.py` plus the cross-service
+   suite against the public gateway.
 3. **publish** — on `main` only: pushes the three images to GitHub Container
    Registry (`ghcr.io/<repo>/<service>:latest` and `:<sha>`).
+4. **deploy** — on `main` only, and only once the repository variable
+   `DEPLOY_HOST` exists: SSHes to the Azure VM, rolls the production stack
+   to this commit's images and health-checks the public domain. A failed
+   test or smoke run never reaches the server; rollback is one variable.
+
+The production stack (`deploy/docker-compose.prod.yml`) runs the published
+images behind **Caddy** with automatic HTTPS for the domain, keeps every
+service but the proxy off the public network, and refuses to start with the
+example JWT secret. VM setup, GitHub variables/secrets and rollback are
+documented step by step in [`deploy/README.md`](deploy/README.md).
 
 ## API overview
 
 | Area | Endpoints |
 |---|---|
 | Auth | `POST /api/auth/register`, `POST /api/auth/login` |
-| Tickets | `POST/GET /api/tickets`, `GET/PATCH /api/tickets/{id}` (staff: `resolution`), `POST /api/tickets/{id}/assign` |
-| Comments | `GET/POST /api/tickets/{id}/comments` |
-| AI | `POST /api/tickets/{id}/ai/copilot`, `GET /api/tickets/{id}/ai/duplicates` |
+| Tickets | `POST/GET /api/tickets` (`?limit&skip&status`, total in `X-Total-Count`), `GET/PATCH /api/tickets/{id}` (staff: `resolution`), `POST /api/tickets/{id}/assign` |
+| Comments | `GET/POST /api/tickets/{id}/comments` (with `media_urls`) |
+| Uploads | `POST /api/uploads` (multipart image/video), `GET /uploads/{id}` |
+| AI | `POST /api/assistant/ask` (customer assistant), `POST /api/tickets/{id}/ai/copilot`, `GET /api/tickets/{id}/ai/duplicates`, `GET /api/ai/status` (staff: model state + scheduler stats) |
 | Queue | `GET /api/queue`, `GET /api/queue/stats`, `POST /api/queue/claim` |
 | Incidents | `GET /api/incidents` (staff: complaints clustered into incidents by the local model) |
 | Forums | `GET /api/forums/boards`, `GET/POST /api/forums/boards/{slug}/threads`, `GET /api/forums/threads/{id}`, `POST /api/forums/threads/{id}/posts`, `PATCH /api/forums/threads/{id}`, `DELETE /api/forums/posts/{id}` |

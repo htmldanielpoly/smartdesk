@@ -1,0 +1,7 @@
+# Reverse proxy with automatic HTTPS (Let's Encrypt) for the public domain.
+# Caddy terminates TLS and forwards everything to the gateway, adding the
+# X-Forwarded-* headers the api-service trusts (TRUST_PROXY_HEADERS=true).
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy api-service:8080
+}

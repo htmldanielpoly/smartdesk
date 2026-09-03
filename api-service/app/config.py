@@ -4,7 +4,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application configuration, loaded from environment variables / .env."""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # env_ignore_empty: docker-compose passes unset optional knobs as empty
+    # strings; treat those as "not set" instead of failing validation.
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)
 
     # MongoDB
     mongo_uri: str = "mongodb://localhost:27017"
@@ -42,9 +44,26 @@ class Settings(BaseSettings):
     forum_service_url: str = "http://localhost:8001"
     forum_timeout_seconds: float = 10.0
 
-    # Rate limiting (simple in-memory limiter)
+    # Abuse protection (see app/rate_limit.py and app/middleware.py).
+    # General budget per user (or per address when unauthenticated) per window.
     rate_limit_requests: int = 30
+    # Stricter budget for content creation: comments, forum posts, messages.
+    rate_limit_writes: int = 20
     rate_limit_window_seconds: int = 60
+    # Take the client address from X-Forwarded-For. Only behind a reverse
+    # proxy you control (Caddy/nginx); otherwise the header can be spoofed.
+    trust_proxy_headers: bool = False
+    # Requests with a bigger body are refused with 413 before being read.
+    max_request_body_bytes: int = 1_048_576  # 1 MiB
+    # Refuse to start with the public default JWT secret (set in production).
+    require_strong_secret: bool = False
+
+    # Media uploads (images/videos on posts, comments, messages). Files are
+    # streamed to UPLOADS_DIR and aborted at the per-type cap; the JSON body
+    # cap above does not apply to this route.
+    uploads_dir: str = "uploads"
+    max_image_bytes: int = 5 * 1_048_576  # 5 MiB
+    max_video_bytes: int = 25 * 1_048_576  # 25 MiB
 
 
 settings = Settings()

@@ -69,9 +69,12 @@ def auto_resolve(req: AutoResolveRequest) -> AutoResolveResponse:
         return _not_resolved("disabled")
 
     title, description = guardrails.sanitize_ticket(req.title, req.description)
-    if guardrails.detect_injection(title, description):
-        # A ticket trying to steer the AI is handled by a human, never auto-answered.
-        return _not_resolved("injection_suspected")
+    threats = guardrails.threat_flags(title, description)
+    if threats:
+        # A ticket trying to steer or pressure the AI is handled by a human.
+        return AutoResolveResponse(
+            resolved=False, threshold=_threshold("fallback"), source="fallback", flags=threats
+        )
 
     # Only candidates that actually carry an answer can resolve anything.
     candidates = [c for c in req.candidates if c.resolution.strip()]

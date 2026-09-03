@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -5,15 +6,48 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.config import settings
 from app.database import connect, disconnect
-from app.routers import admin, ai, auth, comments, forums, incidents, queue, tickets
+from app.middleware import BodySizeLimitMiddleware
+from app.routers import (
+    admin,
+    ai,
+    assistant,
+    auth,
+    comments,
+    forums,
+    incidents,
+    queue,
+    tickets,
+    uploads,
+)
 from app.services.bootstrap import ensure_admin
 
+logger = logging.getLogger(__name__)
+
 STATIC_DIR = Path(__file__).parent / "static"
+_DEFAULT_SECRET = "change-me-in-prod"
+
+
+def check_secret() -> None:
+    """The example JWT secret is public: anyone who read the repo could mint
+    an ADMIN token. Shout about it, and refuse to start where it matters."""
+    if settings.jwt_secret != _DEFAULT_SECRET:
+        return
+    if settings.require_strong_secret:
+        raise RuntimeError(
+            "JWT_SECRET is the public default; set a long random value before "
+            "starting with REQUIRE_STRONG_SECRET=true."
+        )
+    logger.warning(
+        "JWT_SECRET is the public default from .env.example - fine for a laptop, "
+        "never for a deployment: anyone can forge admin tokens. Set JWT_SECRET."
+    )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    check_secret()
     await connect()
     await ensure_admin()
     yield
@@ -21,11 +55,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="SmartDesk API", version="0.3.0", lifespan=lifespan)
+app.add_middleware(BodySizeLimitMiddleware)
 
 app.include_router(auth.router)
 app.include_router(tickets.router)
 app.include_router(comments.router)
 app.include_router(ai.router)
+app.include_router(ai.status_router)
+app.include_router(assistant.router)
+app.include_router(uploads.router)
 app.include_router(queue.router)
 app.include_router(incidents.router)
 app.include_router(forums.router)

@@ -6,8 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.database import get_db
 from app.deps import get_current_user
 from app.models.enums import Role, TicketStatus
+from app.rate_limit import rate_limit_writes
+from app.routers.uploads import upload_exists
 from app.schemas.comment import CommentCreate, CommentOut
 from app.services import activity
+from app.services.names import display_names
 from app.services.serializers import serialize_comment
 
 router = APIRouter(prefix="/api/tickets/{ticket_id}/comments", tags=["comments"])
@@ -39,8 +42,9 @@ async def list_comments(ticket_id: str, user: dict = Depends(get_current_user)):
     if not _is_staff(user):
         query["internal"] = False  # hide internal agent notes from the owner
 
-    cursor = get_db().comments.find(query).sort("createdAt", 1)
-    return [serialize_comment(c) async for c in cursor]
+    comments = [c async for c in get_db().comments.find(query).sort("createdAt", 1)]
+    names = await display_names(c.get("authorId") for c in comments)
+    return [serialize_comment(c, names) for c in comments]
 
 
 @router.post("", response_model=CommentOut, status_code=status.HTTP_201_CREATED)
@@ -48,6 +52,7 @@ async def add_comment(
     ticket_id: str,
     payload: CommentCreate,
     user: dict = Depends(get_current_user),
+    _: None = Depends(rate_limit_writes),
 ):
     ticket = await _load_ticket(ticket_id)
     is_owner = ticket["createdBy"] == user["_id"]
@@ -55,6 +60,13 @@ async def add_comment(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     internal = payload.internal and _is_staff(user)  # only staff may post internal notes
+    # Media must be something this gateway stored: no external or scripted URLs.
+    for url in payload.media_urls:
+        if not await upload_exists(url):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="media_urls must reference files uploaded via /api/uploads",
+            )
     now = datetime.now(UTC)
     doc = {
         "ticketId": ticket["_id"],
@@ -62,6 +74,7 @@ async def add_comment(
         "authorType": "user",
         "body": payload.body,
         "internal": internal,
+        "mediaUrls": list(dict.fromkeys(payload.media_urls)),
         "createdAt": now,
     }
     result = await get_db().comments.insert_one(doc)
@@ -75,4 +88,4 @@ async def add_comment(
             {"_id": ticket["_id"]},
             {"$set": {"resolution": payload.body.strip(), "updatedAt": now}},
         )
-    return serialize_comment(doc)
+    return serialize_comment(doc, {user["_id"]: user.get("displayName") or user["email"]})

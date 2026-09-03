@@ -82,9 +82,10 @@ def _fallback(req: ClassifyRequest, flags: list[str]) -> ClassifyResponse:
 def classify(req: ClassifyRequest) -> ClassifyResponse:
     title, description = guardrails.sanitize_ticket(req.title, req.description)
 
-    # Suspected jailbreak/injection attempts never reach the LLM.
-    if guardrails.detect_injection(title, description):
-        return _fallback(req, flags=["injection_suspected"])
+    # Suspected jailbreak/injection/coercion attempts never reach the LLM.
+    threats = guardrails.threat_flags(title, description)
+    if threats:
+        return _fallback(req, flags=threats)
 
     data = llm_local.chat_json(
         _SYSTEM_PROMPT,

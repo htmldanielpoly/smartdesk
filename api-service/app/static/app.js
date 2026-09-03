@@ -28,6 +28,18 @@ const el = (html) => { const t = document.createElement("template"); t.innerHTML
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const isStaff = () => state.role === "AGENT" || state.role === "ADMIN";
+// Guardrail annotations from the AI service, rendered as badges.
+const FLAG_LABELS = {
+  injection_suspected: ["threat", "⚠ jailbreak attempt detected · rules applied, LLM bypassed"],
+  coercion_suspected: ["threat", "⚠ pressure/blame-shifting detected · rules applied, LLM bypassed"],
+  no_kb_match: ["soft", "no knowledge-base source · refused to generate"],
+  output_rejected: ["threat", "draft rejected by the output guard (unbacked claim or citation)"],
+};
+const flagBadges = (flags) => (flags || []).map((f) => {
+  const [cls, label] = FLAG_LABELS[f] || ["soft", f];
+  return `<span class="badge ${cls}">${esc(label)}</span>`;
+}).join(" ");
+const isThreat = (flags) => (flags || []).some((f) => f === "injection_suspected" || f === "coercion_suspected");
 const initials = (n) => (n || "?").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 
 function decodeJwt(token) {
@@ -187,9 +199,11 @@ function backBtn(label, view, arg) {
 }
 
 /* ---------- Tickets ---------- */
+const PAGE_SIZE = 50;
+
 async function viewTickets(v) {
   let tickets;
-  try { tickets = await api("GET", "/api/tickets"); }
+  try { tickets = await api("GET", `/api/tickets?limit=${PAGE_SIZE}`); }
   catch (e) { return renderError(v, e); }
 
   v.innerHTML = "";
@@ -204,27 +218,90 @@ async function viewTickets(v) {
     return;
   }
   const list = el('<div class="list"></div>');
-  for (const t of tickets) {
+  const addRows = (batch) => batch.forEach((t) => list.appendChild(ticketRow(t)));
+  addRows(tickets);
+  v.appendChild(list);
+  if (tickets.length === PAGE_SIZE) {
+    const more = el('<button class="btn ghost" style="margin-top:12px">Load more</button>');
+    let skip = PAGE_SIZE;
+    more.onclick = async () => {
+      try {
+        const batch = await api("GET", `/api/tickets?limit=${PAGE_SIZE}&skip=${skip}`);
+        addRows(batch); skip += batch.length;
+        if (batch.length < PAGE_SIZE) more.remove();
+      } catch (e) { toast(e.detail, true); }
+    };
+    v.appendChild(more);
+  }
+}
+
+function ticketRow(t) {
     const pr = t.priority || t.ai_suggested?.priority;
+    const who = isStaff() && t.created_by_name ? ` · ${esc(t.created_by_name)}` : "";
     const row = el(`<div class="item">
       <div class="grow">
         <div class="title">${esc(t.title)}</div>
-        <div class="sub">#${t.id.slice(-6)} · ${esc(t.category || t.ai_suggested?.category || "unclassified")} · opened ${timeAgo(t.created_at)}</div>
+        <div class="sub">#${t.id.slice(-6)}${who} · ${esc(t.category || t.ai_suggested?.category || "unclassified")} · opened ${timeAgo(t.created_at)}</div>
       </div>
+      ${isThreat(t.ai_suggested?.flags) ? '<span class="badge threat" title="The ticket text tried to manipulate the AI; it was handled by rules and routed to a human">⚠ jailbreak</span>' : ""}
       ${t.auto_resolved && !t.auto_resolved.reopened_at ? '<span class="badge ai" title="Answered by the AI from a previously resolved ticket">🧠 AI answered</span>' : ""}
       ${pr ? `<span class="badge ${pr}">${pr}</span>` : ""}
       <span class="badge ${t.status}">${t.status.replace("_", " ")}</span>
     </div>`);
     row.onclick = () => navigate("ticket", t.id);
-    list.appendChild(row);
-  }
-  v.appendChild(list);
+    return row;
+}
+
+// Customer-facing assistant: answers from long-term memory or the knowledge
+// base, refuses manipulation, and says so when nothing is documented.
+function assistantCard() {
+  const card = el(`<div class="card card-pad assistant" style="max-width:640px;margin-bottom:16px">
+    <div class="page-head" style="margin-bottom:6px"><h3 style="margin:0;font-size:15px">💬 Ask SmartDesk AI first</h3><span class="badge soft">answers only from known solutions</span></div>
+    <p class="muted" style="margin:0 0 10px;font-size:13px">Describe the problem. If another customer already had it solved, or our knowledge base covers it, you get the answer right away — no ticket needed.</p>
+    <div class="chat" id="as-log"></div>
+    <div class="row" style="gap:8px;margin-top:10px;align-items:flex-start">
+      <textarea id="as-q" placeholder="e.g. My VPN will not connect since this morning" style="min-height:56px;flex:1"></textarea>
+      <button class="btn sm" id="as-send">Ask</button>
+    </div>
+  </div>`);
+  const log = card.querySelector("#as-log");
+  const box = card.querySelector("#as-q");
+  const history = [];
+  const api_ = { card, onOpenTicket: null };
+  const SOURCE = { memory: ["ai", "🧠 from a resolved ticket"], kb: ["ai", "📚 knowledge base"], refused: ["threat", "⚠ refused"], no_answer: ["soft", "nothing documented"] };
+  const add = (who, text, meta) => {
+    const b = el(`<div class="bubble ${who}"><div class="who">${who === "me" ? "You" : "SmartDesk AI"} ${meta || ""}</div><div style="white-space:pre-wrap">${esc(text)}</div></div>`);
+    log.appendChild(b); log.scrollTop = log.scrollHeight; return b;
+  };
+  card.querySelector("#as-send").onclick = async () => {
+    const question = box.value.trim();
+    if (!question) return;
+    box.value = "";
+    add("me", question);
+    const pending = add("ai", "Looking for a known solution…");
+    try {
+      const r = await api("POST", "/api/assistant/ask", { question, conversation: history.slice(-6) });
+      const [cls, label] = SOURCE[r.source] || ["soft", r.source];
+      const cites = (r.citations || []).length ? ` · ${r.citations.map(esc).join(", ")}` : "";
+      pending.remove();
+      const b = add("ai", r.answer, `<span class="badge ${cls}">${label}${cites}</span> ${flagBadges(r.flags)}`);
+      history.push(question, r.answer);
+      if (r.suggest_ticket || r.source === "no_answer") {
+        const open = el('<button class="btn ghost sm" style="margin-top:8px">Open a ticket with this</button>');
+        open.onclick = () => api_.onOpenTicket && api_.onOpenTicket(question);
+        b.appendChild(open);
+      }
+    } catch (e) { pending.remove(); add("ai", e.detail || "The assistant is unavailable; please open a ticket."); }
+  };
+  return api_;
 }
 
 async function viewNewTicket(v) {
   v.innerHTML = "";
   v.appendChild(backBtn("Back to tickets", "tickets"));
   v.appendChild(el(`<div class="page-head"><h2>Open a new ticket</h2></div>`));
+  const assistant = assistantCard();
+  v.appendChild(assistant.card);
   const form = el(`<div class="card card-pad" style="max-width:640px">
     <label class="field"><span>Subject</span><input id="nt-title" maxlength="160" placeholder="Short summary of the issue" /></label>
     <label class="field"><span>Description</span><textarea id="nt-desc" maxlength="5000" placeholder="Describe what happened, steps to reproduce, error messages…"></textarea></label>
@@ -233,6 +310,11 @@ async function viewNewTicket(v) {
     <p class="muted" style="margin-bottom:0">🤖 AI will categorize and prioritize your ticket automatically.</p>
   </div>`);
   v.appendChild(form);
+  assistant.onOpenTicket = (question) => {
+    form.querySelector("#nt-title").value = question.slice(0, 160);
+    form.querySelector("#nt-desc").value = question;
+    form.querySelector("#nt-title").focus();
+  };
   form.querySelector("#nt-submit").onclick = async () => {
     const title = form.querySelector("#nt-title").value.trim();
     const description = form.querySelector("#nt-desc").value.trim();
@@ -256,9 +338,9 @@ async function viewTicket(v, id) {
   v.appendChild(backBtn(isStaff() ? "Back to tickets" : "Back to my tickets", "tickets"));
 
   const ai = t.ai_suggested || {};
-  const aiBadge = ai.status === "pending" ? '<span class="badge ai">🤖 classifying…</span>'
-    : ai.status === "ok" ? `<span class="badge ai">🤖 ${esc(ai.category)} · ${esc(ai.priority)}</span>`
-    : "";
+  const aiBadge = (ai.status === "pending" ? '<span class="badge ai">🤖 classifying…</span>'
+    : ai.status === "ok" ? `<span class="badge ai">🤖 ${esc(ai.category)} · ${esc(ai.priority)}${ai.source === "fallback" ? " · rules" : ""}</span>`
+    : "") + " " + flagBadges(ai.flags);
 
   const grid = el('<div class="detail-grid"></div>');
 
@@ -269,7 +351,7 @@ async function viewTicket(v, id) {
       <h2 style="font-size:19px">${esc(t.title)}</h2>
       <span class="badge ${t.status}">${t.status.replace("_", " ")}</span>
     </div>
-    <div class="muted" style="margin-bottom:12px">#${t.id.slice(-6)} · opened ${timeAgo(t.created_at)} ${aiBadge}</div>
+    <div class="muted" style="margin-bottom:12px">#${t.id.slice(-6)}${t.created_by_name ? ` · by ${esc(t.created_by_name)}` : ""} · opened ${timeAgo(t.created_at)} ${aiBadge}</div>
     <div style="white-space:pre-wrap">${esc(t.description)}</div>
   </div>`));
 
@@ -286,15 +368,27 @@ async function viewTicket(v, id) {
   const composer = el(`<div style="margin-top:12px">
     <textarea id="c-body" placeholder="Write a reply…" style="min-height:70px"></textarea>
     ${isStaff() ? '<label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:13px"><input type="checkbox" id="c-internal" style="width:auto">Internal note (hidden from customer)</label>' : ""}
-    <button class="btn sm" id="c-send" style="margin-top:8px">Send reply</button>
+    <div class="row" style="gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
+      <button class="btn sm" id="c-send">Send reply</button>
+      <label class="btn ghost sm" style="cursor:pointer">📎 Attach image/video<input type="file" id="c-file" accept="image/*,video/mp4,video/webm" multiple style="display:none"></label>
+      <span class="muted" id="c-files" style="font-size:12.5px"></span>
+    </div>
   </div>`);
   convo.appendChild(composer);
+  const fileInput = composer.querySelector("#c-file");
+  fileInput.onchange = () => {
+    const names = [...fileInput.files].map((f) => f.name).join(", ");
+    composer.querySelector("#c-files").textContent = names ? `${fileInput.files.length} file(s): ${names}` : "";
+  };
   composer.querySelector("#c-send").onclick = async () => {
     const body = composer.querySelector("#c-body").value.trim();
     if (!body) return;
     try {
-      await api("POST", `/api/tickets/${id}/comments`, { body, internal: composer.querySelector("#c-internal")?.checked || false });
+      const media_urls = [];
+      for (const f of [...fileInput.files].slice(0, 4)) media_urls.push((await uploadFile(f)).url);
+      await api("POST", `/api/tickets/${id}/comments`, { body, internal: composer.querySelector("#c-internal")?.checked || false, media_urls });
       composer.querySelector("#c-body").value = "";
+      fileInput.value = ""; composer.querySelector("#c-files").textContent = "";
       renderComments(cbox, await api("GET", `/api/tickets/${id}/comments`));
     } catch (e) { toast(e.detail, true); }
   };
@@ -314,12 +408,33 @@ function renderComments(box, comments) {
   for (const c of comments) {
     const isAi = c.author_type === "ai";
     const me = !isAi && c.author_id === state.userId;
-    const who = isAi ? "🤖 SmartDesk AI · answered from memory" : me ? "You" : String(c.author_id || "").slice(-6);
+    const who = isAi ? "🤖 SmartDesk AI · answered from memory" : me ? "You" : esc(c.author_name || String(c.author_id || "").slice(-6));
     box.appendChild(el(`<div class="comment ${c.internal ? "internal" : ""} ${isAi ? "ai" : ""}">
       <div class="head"><span>${who}${c.internal ? " · internal note" : ""}</span><span>${timeAgo(c.created_at)}</span></div>
       <div class="body">${esc(c.body)}</div>
+      ${renderMedia(c.media_urls)}
     </div>`));
   }
+}
+
+// Media attachments: only URLs the gateway itself served (/uploads/<id>).
+function renderMedia(urls) {
+  const safe = (urls || []).filter((u) => /^\/uploads\/[a-f0-9]{32}$/.test(u));
+  if (!safe.length) return "";
+  return `<div class="media">${safe.map((u) => `<a href="${u}" target="_blank" rel="noopener"><img src="${u}" alt="attachment" loading="lazy" onerror="this.outerHTML='<video src=&quot;${u}&quot; controls preload=&quot;metadata&quot;></video>'"></a>`).join("")}</div>`;
+}
+
+// Uploads one file through the gateway (type sniffed and size-capped server-side).
+async function uploadFile(file) {
+  const fd = new FormData();
+  fd.append("file", file, file.name);
+  const resp = await fetch("/api/uploads", { method: "POST", headers: state.token ? { Authorization: `Bearer ${state.token}` } : {}, body: fd });
+  if (!resp.ok) {
+    let detail = `Upload failed (${resp.status})`;
+    try { detail = (await resp.json()).detail || detail; } catch {}
+    throw { status: resp.status, detail };
+  }
+  return resp.json();
 }
 
 function memoryCard(t) {
@@ -364,7 +479,7 @@ function ticketMetaCard(t) {
   list.appendChild(el(`<div><div class="k">Priority</div><div class="v">${pr ? `<span class="badge ${pr}">${pr}</span>` : "—"}</div></div>`));
   list.appendChild(el(`<div><div class="k">Category</div><div class="v">${esc(cat || "—")}</div></div>`));
   list.appendChild(el(`<div><div class="k">Department</div><div class="v">${esc(t.department || t.ai_suggested?.department || "—")}</div></div>`));
-  list.appendChild(el(`<div><div class="k">Assigned</div><div class="v">${t.assigned_agent ? t.assigned_agent.slice(-6) : "Unassigned"}</div></div>`));
+  list.appendChild(el(`<div><div class="k">Assigned</div><div class="v">${t.assigned_agent ? esc(t.assigned_agent_name || t.assigned_agent.slice(-6)) : "Unassigned"}</div></div>`));
   if (t.resolution && !isStaff()) list.appendChild(el(`<div><div class="k">Resolution</div><div class="resolution-box">${esc(t.resolution)}</div></div>`));
 
   if (isStaff()) {
@@ -436,7 +551,8 @@ function copilotCard(ticketId) {
     try {
       const r = await api("POST", `/api/tickets/${ticketId}/ai/copilot`);
       out.innerHTML = "";
-      out.appendChild(el(`<div class="ai-box"><h4>Suggested solution <span class="badge soft">${esc(r.source)}</span></h4><div style="white-space:pre-wrap;margin-bottom:12px">${esc(r.suggested_solution || "—")}</div><h4>Draft response</h4><div style="white-space:pre-wrap">${esc(r.draft_response || "—")}</div></div>`));
+      const cites = (r.citations || []).length ? `<div class="muted" style="font-size:12px;margin-top:10px">Grounded in: ${r.citations.map((c) => `<code>${esc(c)}</code>`).join(" ")}</div>` : "";
+      out.appendChild(el(`<div class="ai-box"><h4>Suggested solution <span class="badge soft">${esc(r.source)}</span> ${flagBadges(r.flags)}</h4><div style="white-space:pre-wrap;margin-bottom:12px">${esc(r.suggested_solution || "—")}</div><h4>Draft response</h4><div style="white-space:pre-wrap">${esc(r.draft_response || "—")}</div>${cites}</div>`));
     } catch (e) { out.innerHTML = `<p class="err-text">${esc(e.detail)}</p>`; }
   };
   card.querySelector("#cp-dupes").onclick = async () => {
@@ -459,6 +575,39 @@ function copilotCard(ticketId) {
 }
 
 /* ---------- Queue (staff) ---------- */
+// Live view of the AI engine: model state + the priority scheduler's queue.
+// Polls while the card is on screen; stops as soon as the view changes.
+function aiEngineCard() {
+  const card = el(`<div class="card card-pad engine" style="margin-bottom:20px">
+    <div class="page-head" style="margin-bottom:8px"><h3 style="margin:0;font-size:15px">⚙️ AI engine</h3><span class="badge soft" id="eng-model">…</span></div>
+    <div class="engine-grid" id="eng-grid"><span class="muted">Loading…</span></div>
+  </div>`);
+  const tick = async () => {
+    if (!card.isConnected) return;
+    try {
+      const h = await api("GET", "/api/ai/status");
+      const m = h.local_ai || {}, s = h.scheduler || {};
+      const modelBadge = card.querySelector("#eng-model");
+      modelBadge.textContent = m.status === "ready" ? "local models ready" : `models: ${m.status || "unknown"} · rule-based fallbacks`;
+      modelBadge.className = "badge " + (m.status === "ready" ? "ai" : "soft");
+      const kinds = Object.entries(s.by_kind || {}).map(([k, n]) => `${k} ${n}`).join(" · ") || "—";
+      card.querySelector("#eng-grid").innerHTML = `
+        <div><div class="n">${s.workers ?? "—"}</div><div class="l">parallel workers</div></div>
+        <div><div class="n">${s.queued ?? 0}</div><div class="l">queued (priority order)</div></div>
+        <div><div class="n">${s.running ?? 0}</div><div class="l">running now</div></div>
+        <div><div class="n">${s.completed ?? 0}</div><div class="l">completed</div></div>
+        <div><div class="n">${s.avg_wait_ms ?? 0}<small>ms</small></div><div class="l">avg queue wait</div></div>
+        <div><div class="n" style="color:${(s.rejected || 0) + (s.timed_out || 0) ? "var(--danger)" : "inherit"}">${(s.rejected || 0) + (s.timed_out || 0)}</div><div class="l">rejected / timed out</div></div>
+        <div class="span"><div class="l">jobs by kind</div><div class="v">${esc(kinds)}</div></div>`;
+    } catch (e) {
+      card.querySelector("#eng-grid").innerHTML = `<span class="err-text">${esc(e.detail || "AI service unavailable")}</span>`;
+    }
+    setTimeout(tick, 4000);
+  };
+  tick();
+  return card;
+}
+
 async function viewQueue(v) {
   let queue, stats;
   try { queue = await api("GET", "/api/queue"); stats = await api("GET", "/api/queue/stats"); }
@@ -483,6 +632,7 @@ async function viewQueue(v) {
     if (byP[p]) statRow.appendChild(el(`<div class="stat"><div class="n">${byP[p]}</div><div class="l">${p}</div></div>`));
   }
   v.appendChild(statRow);
+  v.appendChild(aiEngineCard());
 
   if (!queue.length) { v.appendChild(el('<div class="empty"><div class="big">🎉</div>Queue is empty. Nothing waiting!</div>')); return; }
 

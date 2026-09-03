@@ -2,7 +2,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # env_ignore_empty: docker-compose passes unset optional knobs as empty
+    # strings (LLM_THREADS: ${LLM_THREADS:-}); treat those as "not set".
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)
 
     # --- Local AI (open-weights models served in-process via llama.cpp) ---
     # Set LOCAL_AI_ENABLED=false to run purely on rule-based fallbacks.
@@ -33,6 +35,20 @@ class Settings(BaseSettings):
     llm_context_tokens: int = 4096
     llm_max_output_tokens: int = 512
     llm_temperature: float = 0.2
+    # CPU threads per llama.cpp model (None = llama.cpp default, all cores).
+    # With two models running in parallel, half the cores each is a good start.
+    llm_threads: int | None = None
+
+    # --- AI job scheduler (services/scheduler.py) ---
+    # Worker tasks pulling jobs off the priority queue. Rule-based work runs
+    # freely in parallel; model work is serialised per model by its lock, so
+    # more than ~2-4 workers mostly helps fallback/lexical jobs.
+    ai_workers: int = 4
+    # Queue capacity; beyond it new jobs are rejected (503) immediately so the
+    # gateway falls back instead of waiting.
+    ai_queue_max: int = 200
+    # Hard cap on a job's queue wait + run time.
+    ai_job_timeout_seconds: float = 120.0
 
     # --- Knowledge-base grounding (anti-hallucination) ---
     # Copilot answers must be grounded in a KB article at least this similar
@@ -63,6 +79,13 @@ class Settings(BaseSettings):
     # Jaccard token-overlap threshold for the lexical fallback (no model).
     # Only near-verbatim re-submissions score this high lexically.
     auto_resolve_fallback_threshold: float = 0.90
+
+    # --- Customer-facing assistant (services/assistant.py) ---
+    # Similarity a resolved ticket must reach for the assistant to quote its
+    # resolution. Lower than auto-resolve: here the customer reads and
+    # decides, nothing is closed on their behalf.
+    assistant_memory_threshold: float = 0.80
+    assistant_memory_fallback_threshold: float = 0.60
 
     # --- Incident clustering thresholds ---
     # Cosine similarity (embedding path) above which two tickets belong to the

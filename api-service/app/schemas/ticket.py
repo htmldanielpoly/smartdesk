@@ -10,6 +10,11 @@ class AISuggestion(BaseModel):
     priority: str | None = None
     department: str | None = None
     status: str = "pending"  # pending | ok | unavailable
+    source: str | None = None  # "local" (LLM) | "fallback" (rules)
+    confidence: float | None = None
+    # Guardrail annotations from classification, e.g. ["injection_suspected"]:
+    # the ticket text tried to manipulate the AI and was handled by rules.
+    flags: list[str] = Field(default_factory=list)
 
 
 class AutoResolvedInfo(BaseModel):
@@ -50,7 +55,9 @@ class TicketOut(BaseModel):
     description: str
     status: TicketStatus
     created_by: str
+    created_by_name: str | None = None
     assigned_agent: str | None = None
+    assigned_agent_name: str | None = None
     category: str | None = None
     priority: str | None = None
     department: str | None = None
