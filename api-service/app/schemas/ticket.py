@@ -55,7 +55,9 @@ class TicketOut(BaseModel):
     description: str
     status: TicketStatus
     created_by: str
+    created_by_name: str | None = None
     assigned_agent: str | None = None
+    assigned_agent_name: str | None = None
     category: str | None = None
     priority: str | None = None
     department: str | None = None

@@ -10,6 +10,7 @@ from app.rate_limit import rate_limit_writes
 from app.routers.uploads import upload_exists
 from app.schemas.comment import CommentCreate, CommentOut
 from app.services import activity
+from app.services.names import display_names
 from app.services.serializers import serialize_comment
 
 router = APIRouter(prefix="/api/tickets/{ticket_id}/comments", tags=["comments"])
@@ -41,8 +42,9 @@ async def list_comments(ticket_id: str, user: dict = Depends(get_current_user)):
     if not _is_staff(user):
         query["internal"] = False  # hide internal agent notes from the owner
 
-    cursor = get_db().comments.find(query).sort("createdAt", 1)
-    return [serialize_comment(c) async for c in cursor]
+    comments = [c async for c in get_db().comments.find(query).sort("createdAt", 1)]
+    names = await display_names(c.get("authorId") for c in comments)
+    return [serialize_comment(c, names) for c in comments]
 
 
 @router.post("", response_model=CommentOut, status_code=status.HTTP_201_CREATED)
@@ -86,4 +88,4 @@ async def add_comment(
             {"_id": ticket["_id"]},
             {"$set": {"resolution": payload.body.strip(), "updatedAt": now}},
         )
-    return serialize_comment(doc)
+    return serialize_comment(doc, {user["_id"]: user.get("displayName") or user["email"]})
