@@ -45,11 +45,21 @@ async def proxy(path: str, request: Request) -> JSONResponse:
             content={"detail": "Forum service is unavailable."},
         )
 
-    try:
-        content = resp.json()
-    except ValueError:
-        content = None
-    return JSONResponse(status_code=resp.status_code, content=content)
+    content_type = resp.headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            content = resp.json()
+        except ValueError:
+            content = None
+        return JSONResponse(status_code=resp.status_code, content=content)
+    else:
+        # Binary response (images, videos) — stream bytes directly
+        from fastapi.responses import Response
+        return Response(
+            content=resp.content,
+            status_code=resp.status_code,
+            media_type=content_type,
+        )
 
 
 @router.websocket("/ws")

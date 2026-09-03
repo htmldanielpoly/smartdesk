@@ -34,9 +34,11 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change-me-in-prod}   # must match api-service
     networks:
       - smartdesk
-    ports: # <-- ADD THIS LINE
-      - "8001:8001"       # <-- ADD THIS LINE
+    ports:
+      - "8001:8001"
     # Internal only — reachable from api-service at http://forum-service:8001.
+    volumes:
+      - forum_uploads:/app/uploads
 
   api-service:
     build: ./api-service
@@ -68,3 +70,4 @@ networks:
 volumes:
   mongo_data:
   ai_models:
+  forum_uploads:

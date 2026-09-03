@@ -1,5 +1,10 @@
 from datetime import UTC, datetime
 
+import os
+import uuid
+from fastapi import UploadFile, File
+from fastapi.responses import FileResponse
+
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status,WebSocket, WebSocketDisconnect
 from app.rate_limit import rate_limit, rate_limit_post, rate_limit_message
@@ -411,7 +416,68 @@ async def my_summary(user: dict = Depends(get_current_user)):
 
 
 
+# --- Media Upload ---
 
+UPLOAD_DIR = "/app/uploads"
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB hard limit
+ALLOWED_TYPES = {
+    "image/jpeg", "image/png", "image/gif", "image/webp",
+    "video/mp4", "video/webm",
+}
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+@router.post("/upload", status_code=status.HTTP_201_CREATED)
+async def upload_media(
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
+    _: None = Depends(rate_limit),
+):
+    """Upload an image or video. Max 10 MB. Returns a URL to embed in posts."""
+    # 1. Check content type
+    if file.content_type not in ALLOWED_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"File type '{file.content_type}' not allowed. Use JPEG, PNG, GIF, WebP, MP4, or WebM.",
+        )
+
+    # 2. Read with size cap — protects against huge file uploads
+    chunk_size = 1024 * 64  # 64 KB chunks
+    total = 0
+    chunks = []
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="File too large. Maximum size is 10 MB.",
+            )
+        chunks.append(chunk)
+
+    # 3. Save with a unique name to prevent collisions and path traversal
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "bin"
+    safe_name = f"{uuid.uuid4().hex}.{ext}"
+    dest = os.path.join(UPLOAD_DIR, safe_name)
+    with open(dest, "wb") as f:
+        for chunk in chunks:
+            f.write(chunk)
+
+    return {"url": f"/media/{safe_name}", "filename": safe_name}
+
+
+@router.get("/media/{filename}")
+async def serve_media(filename: str):
+    """Serve an uploaded media file."""
+    # Prevent path traversal attacks
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid filename")
+    path = os.path.join(UPLOAD_DIR, filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    return FileResponse(path)
 
 
 
