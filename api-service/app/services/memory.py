@@ -49,7 +49,7 @@ async def latest_staff_reply(ticket_id: ObjectId) -> str | None:
         c
         async for c in db.comments.find(
             {"ticketId": ticket_id, "internal": False, "authorType": {"$ne": "ai"}}
-        ).sort("createdAt", -1)
+        ).sort([("createdAt", -1), ("_id", -1)])
     ]
     author_ids = {c["authorId"] for c in comments if c.get("authorId")}
     if not author_ids:
