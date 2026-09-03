@@ -172,3 +172,44 @@ def test_prompt_injection_ticket_still_created_safely(client):
         headers=auth(token),
     )
     assert r.status_code == 201
+
+
+# --- Spam / flooding is throttled per user -----------------------------------
+
+def test_message_flood_is_throttled_per_user(client, monkeypatch):
+    """The forum guideline's "1000 messages in a short time" attack: content
+    creation has a strict per-user budget, and the neighbour behind the same
+    address keeps working."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "rate_limit_writes", 4)
+    flooder = auth(register(client, "flood@example.com").json()["access_token"])
+    neighbour = auth(register(client, "calm@example.com").json()["access_token"])
+    tid = client.post(
+        "/api/tickets", json={"title": "t", "description": "d"}, headers=flooder
+    ).json()["id"]
+
+    codes = [
+        client.post(f"/api/tickets/{tid}/comments", json={"body": "!!!"}, headers=flooder)
+        .status_code
+        for _ in range(10)
+    ]
+    assert codes[:4] == [201] * 4 and set(codes[4:]) == {429}
+
+    own = client.post("/api/tickets", json={"title": "n", "description": "d"}, headers=neighbour)
+    assert own.status_code == 201
+
+
+def test_oversized_upload_is_refused_at_the_edge(client, monkeypatch):
+    """The "huge video file to overload the database" attack: the gateway
+    refuses bodies above MAX_REQUEST_BODY_BYTES with 413 before reading them."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "max_request_body_bytes", 20_000)
+    token = auth(register(client, "uploader@example.com").json()["access_token"])
+    r = client.post(
+        "/api/forums/boards/general/threads",
+        json={"title": "video", "body": "Z" * 100_000},
+        headers=token,
+    )
+    assert r.status_code == 413

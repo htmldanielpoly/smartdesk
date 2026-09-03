@@ -160,6 +160,27 @@ soft-deleted. The forum-service is never exposed directly — the api-service
 proxies it under `/api/forums/*` and it validates the same JWTs (shared
 secret, no cross-service user lookup).
 
+## Abuse protection — spam, floods and oversized uploads
+
+The gateway is the only exposed service, so the defences live there
+(`api-service/app/rate_limit.py`, `api-service/app/middleware.py`):
+
+- **Per-user rate limits.** Every metered endpoint has a general budget
+  (`RATE_LIMIT_REQUESTS` per minute); anything that *creates content* — ticket
+  comments, forum threads, posts and messages — has a stricter one
+  (`RATE_LIMIT_WRITES`). Budgets are keyed by the user id in the JWT, not the
+  client address, so one flooding customer cannot lock out everyone behind
+  the same NAT or reverse proxy (and a Locust swarm from one host is metered
+  per virtual user). Unauthenticated calls (register/login) are metered per
+  address. Rejections are `429` with a `Retry-After` header.
+- **Body size cap.** Requests bigger than `MAX_REQUEST_BODY_BYTES` (1 MiB by
+  default; every API body is a small JSON document) are refused with `413`
+  before they are read — declared lengths are rejected outright, chunked
+  streams are cut off the moment they cross the cap.
+- **Secrets.** The api-service logs a loud warning when it runs with the
+  public example `JWT_SECRET`, and refuses to start with it when
+  `REQUIRE_STRONG_SECRET=true` (the production compose file sets this).
+
 ## Quick start (Docker)
 
 ```bash
@@ -230,7 +251,7 @@ rule-based fallbacks unless you also `pip install -r requirements-llm.txt`
 ## Running tests
 
 ```bash
-cd api-service   && pip install -r requirements-dev.txt && pytest   # 60 tests
+cd api-service   && pip install -r requirements-dev.txt && pytest   # 72 tests
 cd ai-service    && pip install -r requirements-dev.txt && pytest   # 84 tests
 cd forum-service && pip install -r requirements-dev.txt && pytest   # 14 tests
 ```
@@ -248,7 +269,7 @@ taxonomy and maps each type to concrete tests — see
 each service; the cross-service suite adds:
 
 ```bash
-pytest tests/                              # Security (RBAC, auth-bypass, injection)
+pytest tests/                              # Security (RBAC, auth-bypass, injection, spam, uploads)
                                            #  + System (end-to-end, skips if no stack)
 ```
 

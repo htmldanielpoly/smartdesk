@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.database import get_db
 from app.deps import get_current_user
 from app.models.enums import Role, TicketStatus
+from app.rate_limit import rate_limit_writes
 from app.schemas.comment import CommentCreate, CommentOut
 from app.services import activity
 from app.services.serializers import serialize_comment
@@ -48,6 +49,7 @@ async def add_comment(
     ticket_id: str,
     payload: CommentCreate,
     user: dict = Depends(get_current_user),
+    _: None = Depends(rate_limit_writes),
 ):
     ticket = await _load_ticket(ticket_id)
     is_owner = ticket["createdBy"] == user["_id"]
