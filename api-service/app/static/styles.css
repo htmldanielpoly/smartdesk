@@ -281,3 +281,7 @@ textarea { resize: vertical; min-height: 96px; }
 .memory-box h3 { margin: 0 0 6px; font-size: 15px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .memory-box p { margin: 0; font-size: 13.5px; }
 .resolution-box { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; font-weight: 400; font-size: 13.5px; }
+
+/* ---------- Guardrail badges ---------- */
+.badge.threat { background: var(--danger-soft); color: var(--danger); }
+.ai-box code { background: #ebe6fb; padding: 1px 5px; border-radius: 4px; font-size: 12px; }

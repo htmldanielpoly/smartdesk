@@ -134,7 +134,7 @@ def test_injection_attempt_is_never_auto_resolved(monkeypatch):
         _request(title=evil.title, description=evil.description, candidates=[evil])
     )
     assert res.resolved is False
-    assert res.flags == ["injection_suspected"]
+    assert "injection_suspected" in res.flags
     assert res.draft_response is None
 
 

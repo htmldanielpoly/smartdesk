@@ -45,6 +45,8 @@ async def copilot(
         suggested_solution=ai.get("suggested_solution", ""),
         draft_response=ai.get("draft_response", ""),
         source=ai.get("source", "ai"),
+        citations=[c for c in ai.get("citations", []) if isinstance(c, str)],
+        flags=[f for f in ai.get("flags", []) if isinstance(f, str)],
     )
 
 

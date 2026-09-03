@@ -78,10 +78,14 @@ Defense in depth, tested by a dedicated guardrail test suite
 1. **Constrained decoding** — every LLM call is grammar-constrained to a JSON
    schema (llama.cpp compiles it into the sampler). Category/priority are
    *enums in the grammar*: an invalid label cannot even be generated.
-2. **Prompt-injection detection** — tickets matching jailbreak patterns
-   ("ignore previous instructions", persona switches, ...) never reach the
-   model; they are classified by deterministic rules and flagged
-   `injection_suspected`.
+2. **Prompt-injection and coercion detection** — tickets matching jailbreak
+   patterns ("ignore previous instructions", "ignore all rules", DAN and
+   other personas, "pretend to be", fake authority, prompt extraction) or
+   "yes-man" pressure ("admit the problem is with the service", "otherwise a
+   catastrophe will happen", "you must agree with me") never reach the
+   model; they are classified by deterministic rules, never auto-answered
+   from memory, and flagged `injection_suspected` / `coercion_suspected`.
+   The flag is shown on the ticket (⚠ badge) so agents see the attempt.
 3. **Input sanitization** — chat-template control tokens (`<|im_start|>` etc.)
    and control characters are stripped, lengths capped, and ticket text is
    fenced as untrusted data in the prompt.
@@ -89,8 +93,10 @@ Defense in depth, tested by a dedicated guardrail test suite
    curated knowledge base (`ai-service/app/data/kb_articles.json`). If no
    article is similar enough to the ticket, it *refuses to generate* and
    returns a safe template. Citations are grammar-constrained to the retrieved
-   article ids and validated after generation; a draft that cites nothing real
-   or contains a URL not present in the KB is discarded.
+   article ids and validated after generation; a draft that cites nothing real,
+   contains a URL not present in the KB, or **makes a commitment the KB does
+   not back** (a refund, a credit, an admission of fault, "as you demanded")
+   is discarded — the copilot cannot be talked into being a yes-man.
 5. **The model never decides alone** — departments are derived server-side
    from the category; all labels are whitelist-validated again after decoding.
 
@@ -224,8 +230,8 @@ rule-based fallbacks unless you also `pip install -r requirements-llm.txt`
 ## Running tests
 
 ```bash
-cd api-service   && pip install -r requirements-dev.txt && pytest   # 58 tests
-cd ai-service    && pip install -r requirements-dev.txt && pytest   # 46 tests
+cd api-service   && pip install -r requirements-dev.txt && pytest   # 60 tests
+cd ai-service    && pip install -r requirements-dev.txt && pytest   # 84 tests
 cd forum-service && pip install -r requirements-dev.txt && pytest   # 14 tests
 ```
 

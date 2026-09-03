@@ -28,6 +28,18 @@ const el = (html) => { const t = document.createElement("template"); t.innerHTML
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const isStaff = () => state.role === "AGENT" || state.role === "ADMIN";
+// Guardrail annotations from the AI service, rendered as badges.
+const FLAG_LABELS = {
+  injection_suspected: ["threat", "⚠ jailbreak attempt detected · rules applied, LLM bypassed"],
+  coercion_suspected: ["threat", "⚠ pressure/blame-shifting detected · rules applied, LLM bypassed"],
+  no_kb_match: ["soft", "no knowledge-base source · refused to generate"],
+  output_rejected: ["threat", "draft rejected by the output guard (unbacked claim or citation)"],
+};
+const flagBadges = (flags) => (flags || []).map((f) => {
+  const [cls, label] = FLAG_LABELS[f] || ["soft", f];
+  return `<span class="badge ${cls}">${esc(label)}</span>`;
+}).join(" ");
+const isThreat = (flags) => (flags || []).some((f) => f === "injection_suspected" || f === "coercion_suspected");
 const initials = (n) => (n || "?").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 
 function decodeJwt(token) {
@@ -211,6 +223,7 @@ async function viewTickets(v) {
         <div class="title">${esc(t.title)}</div>
         <div class="sub">#${t.id.slice(-6)} · ${esc(t.category || t.ai_suggested?.category || "unclassified")} · opened ${timeAgo(t.created_at)}</div>
       </div>
+      ${isThreat(t.ai_suggested?.flags) ? '<span class="badge threat" title="The ticket text tried to manipulate the AI; it was handled by rules and routed to a human">⚠ jailbreak</span>' : ""}
       ${t.auto_resolved && !t.auto_resolved.reopened_at ? '<span class="badge ai" title="Answered by the AI from a previously resolved ticket">🧠 AI answered</span>' : ""}
       ${pr ? `<span class="badge ${pr}">${pr}</span>` : ""}
       <span class="badge ${t.status}">${t.status.replace("_", " ")}</span>
@@ -256,9 +269,9 @@ async function viewTicket(v, id) {
   v.appendChild(backBtn(isStaff() ? "Back to tickets" : "Back to my tickets", "tickets"));
 
   const ai = t.ai_suggested || {};
-  const aiBadge = ai.status === "pending" ? '<span class="badge ai">🤖 classifying…</span>'
-    : ai.status === "ok" ? `<span class="badge ai">🤖 ${esc(ai.category)} · ${esc(ai.priority)}</span>`
-    : "";
+  const aiBadge = (ai.status === "pending" ? '<span class="badge ai">🤖 classifying…</span>'
+    : ai.status === "ok" ? `<span class="badge ai">🤖 ${esc(ai.category)} · ${esc(ai.priority)}${ai.source === "fallback" ? " · rules" : ""}</span>`
+    : "") + " " + flagBadges(ai.flags);
 
   const grid = el('<div class="detail-grid"></div>');
 
@@ -436,7 +449,8 @@ function copilotCard(ticketId) {
     try {
       const r = await api("POST", `/api/tickets/${ticketId}/ai/copilot`);
       out.innerHTML = "";
-      out.appendChild(el(`<div class="ai-box"><h4>Suggested solution <span class="badge soft">${esc(r.source)}</span></h4><div style="white-space:pre-wrap;margin-bottom:12px">${esc(r.suggested_solution || "—")}</div><h4>Draft response</h4><div style="white-space:pre-wrap">${esc(r.draft_response || "—")}</div></div>`));
+      const cites = (r.citations || []).length ? `<div class="muted" style="font-size:12px;margin-top:10px">Grounded in: ${r.citations.map((c) => `<code>${esc(c)}</code>`).join(" ")}</div>` : "";
+      out.appendChild(el(`<div class="ai-box"><h4>Suggested solution <span class="badge soft">${esc(r.source)}</span> ${flagBadges(r.flags)}</h4><div style="white-space:pre-wrap;margin-bottom:12px">${esc(r.suggested_solution || "—")}</div><h4>Draft response</h4><div style="white-space:pre-wrap">${esc(r.draft_response || "—")}</div>${cites}</div>`));
     } catch (e) { out.innerHTML = `<p class="err-text">${esc(e.detail)}</p>`; }
   };
   card.querySelector("#cp-dupes").onclick = async () => {
