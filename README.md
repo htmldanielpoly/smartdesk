@@ -314,15 +314,27 @@ locust -f tests/Stress_Tests/locustfile.py --host http://localhost:8080
 
 (Apache Bench and the race-condition concurrency test are covered there too.)
 
-## CI/CD
+## CI/CD and deployment
 
-GitHub Actions (`.github/workflows/ci.yml`):
+GitHub Actions (`.github/workflows/ci.yml`) runs the whole chain on every
+push to `main` (and the first two jobs on every pull request):
 
 1. **lint-test** — ruff + pytest for each service, in parallel.
 2. **docker-smoke** — builds the real images, boots the whole stack with
-   docker compose and runs `scripts/smoke_test.py` against the public gateway.
+   docker compose and runs `scripts/smoke_test.py` plus the cross-service
+   suite against the public gateway.
 3. **publish** — on `main` only: pushes the three images to GitHub Container
    Registry (`ghcr.io/<repo>/<service>:latest` and `:<sha>`).
+4. **deploy** — on `main` only, and only once the repository variable
+   `DEPLOY_HOST` exists: SSHes to the Azure VM, rolls the production stack
+   to this commit's images and health-checks the public domain. A failed
+   test or smoke run never reaches the server; rollback is one variable.
+
+The production stack (`deploy/docker-compose.prod.yml`) runs the published
+images behind **Caddy** with automatic HTTPS for the domain, keeps every
+service but the proxy off the public network, and refuses to start with the
+example JWT secret. VM setup, GitHub variables/secrets and rollback are
+documented step by step in [`deploy/README.md`](deploy/README.md).
 
 ## API overview
 

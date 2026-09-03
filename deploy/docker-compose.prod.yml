@@ -1,0 +1,105 @@
+# Production stack for a single Azure VM (or any Docker host with a domain).
+#
+# Differences from the development docker-compose.yml at the repo root:
+#   * no builds: every service runs the image CI published to GHCR for one
+#     commit (IMAGE_TAG=<git sha>, written by the deploy job); rollback is
+#     "set IMAGE_TAG to an older sha and `docker compose up -d`";
+#   * Caddy in front: automatic HTTPS for $DOMAIN (Let's Encrypt), the only
+#     ports open to the internet are 80/443; api-service is not published;
+#   * hardening: the api-service refuses to start with the example JWT
+#     secret (REQUIRE_STRONG_SECRET) and trusts X-Forwarded-For from Caddy
+#     so rate limits see real client addresses.
+#
+# Usage on the VM (see deploy/README.md):
+#   cd /opt/smartdesk && docker compose --env-file .env -f docker-compose.prod.yml up -d
+name: smartdesk
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env (e.g. smartdesk.example.com)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api-service
+    networks:
+      - smartdesk
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - smartdesk
+
+  ai-service:
+    image: ghcr.io/${GITHUB_REPOSITORY:-htmldanielpoly/smartdesk}/ai-service:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      LOCAL_AI_ENABLED: ${LOCAL_AI_ENABLED:-true}
+      MODELS_DIR: /models
+      AUTO_DOWNLOAD_MODELS: ${AUTO_DOWNLOAD_MODELS:-true}
+      AUTO_RESOLVE_ENABLED: ${AUTO_RESOLVE_ENABLED:-true}
+      AUTO_RESOLVE_SIMILARITY_THRESHOLD: ${AUTO_RESOLVE_SIMILARITY_THRESHOLD:-0.95}
+      AI_WORKERS: ${AI_WORKERS:-4}
+      AI_QUEUE_MAX: ${AI_QUEUE_MAX:-200}
+      LLM_THREADS: ${LLM_THREADS:-}
+    volumes:
+      - ai_models:/models
+    networks:
+      - smartdesk
+
+  forum-service:
+    image: ghcr.io/${GITHUB_REPOSITORY:-htmldanielpoly/smartdesk}/forum-service:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    environment:
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DB: smartdesk_forum
+      JWT_SECRET: ${JWT_SECRET:?set a long random JWT_SECRET in .env}
+    networks:
+      - smartdesk
+
+  api-service:
+    image: ghcr.io/${GITHUB_REPOSITORY:-htmldanielpoly/smartdesk}/api-service:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      - mongo
+      - ai-service
+      - forum-service
+    environment:
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DB: smartdesk
+      JWT_SECRET: ${JWT_SECRET:?set a long random JWT_SECRET in .env}
+      REQUIRE_STRONG_SECRET: "true"
+      TRUST_PROXY_HEADERS: "true"
+      AI_SERVICE_URL: http://ai-service:8000
+      FORUM_SERVICE_URL: http://forum-service:8001
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?set ADMIN_EMAIL in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
+      RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-60}
+      RATE_LIMIT_WRITES: ${RATE_LIMIT_WRITES:-20}
+      MAX_REQUEST_BODY_BYTES: ${MAX_REQUEST_BODY_BYTES:-1048576}
+      AUTO_RESOLVE_ENABLED: ${AUTO_RESOLVE_ENABLED:-true}
+    # Not published: reachable only through Caddy on the private network.
+    networks:
+      - smartdesk
+
+networks:
+  smartdesk:
+    driver: bridge
+
+volumes:
+  mongo_data:
+  ai_models:
+  caddy_data:
+  caddy_config:
