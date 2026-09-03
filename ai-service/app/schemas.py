@@ -68,3 +68,39 @@ class ClusterResponse(BaseModel):
     # Each group is a list of item ids that form one incident/cluster.
     groups: list[list[str]] = Field(default_factory=list)
     source: str  # "local" | "fallback"
+
+
+# --- Long-term memory: automated resolution ---------------------------------
+
+class MemoryCandidate(BaseModel):
+    """A previously resolved ticket together with the answer that resolved it."""
+
+    ticket_id: str
+    title: str
+    description: str
+    resolution: str
+
+
+class AutoResolveRequest(BaseModel):
+    title: str
+    description: str
+    candidates: list[MemoryCandidate] = Field(default_factory=list)
+
+
+class AutoResolveMatch(BaseModel):
+    ticket_id: str
+    title: str
+    similarity: float
+
+
+class AutoResolveResponse(BaseModel):
+    # True when a stored resolution can be applied without a human.
+    resolved: bool
+    match: AutoResolveMatch | None = None
+    # Customer-facing reply drafted from the matched ticket's resolution.
+    draft_response: str | None = None
+    # The threshold that applied (depends on the similarity path used).
+    threshold: float
+    source: str  # "local" | "fallback"
+    # Why nothing was resolved, e.g. ["injection_suspected"], ["below_threshold"].
+    flags: list[str] = Field(default_factory=list)

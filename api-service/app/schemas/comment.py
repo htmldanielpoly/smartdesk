@@ -11,7 +11,8 @@ class CommentCreate(BaseModel):
 class CommentOut(BaseModel):
     id: str
     ticket_id: str
-    author_id: str
+    author_id: str | None  # None for AI-authored replies
+    author_type: str = "user"  # "user" | "ai"
     body: str
     internal: bool
     created_at: datetime

@@ -15,6 +15,10 @@ services:
       LOCAL_AI_ENABLED: ${LOCAL_AI_ENABLED:-true}
       MODELS_DIR: /models
       AUTO_DOWNLOAD_MODELS: ${AUTO_DOWNLOAD_MODELS:-true}
+      # Long-term memory: similarity a resolved ticket must reach for the AI
+      # to answer a new ticket by itself.
+      AUTO_RESOLVE_ENABLED: ${AUTO_RESOLVE_ENABLED:-true}
+      AUTO_RESOLVE_SIMILARITY_THRESHOLD: ${AUTO_RESOLVE_SIMILARITY_THRESHOLD:-0.95}
     volumes:
       # Model files (~450 MB) are downloaded on first start and persist here,
       # so container rebuilds never re-download them.
@@ -49,6 +53,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change-me-in-prod}
       AI_SERVICE_URL: http://ai-service:8000
       FORUM_SERVICE_URL: http://forum-service:8001
+      AUTO_RESOLVE_ENABLED: ${AUTO_RESOLVE_ENABLED:-true}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       # Per-IP request cap. Raise it when seeding the grid demo or load testing

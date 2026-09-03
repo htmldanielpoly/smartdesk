@@ -19,8 +19,8 @@ tests/
 
 | Lecture test type | What it checks | In this project |
 |---|---|---|
-| **Unit** | one function/class in isolation; tests independent of the impl | `api-service/tests/test_queueing.py` (queue scoring, SLA, aging), `test_security.py` (hashing/JWT), `test_status_transitions.py` (state machine), `ai-service/tests/test_guardrails.py`, `test_fallback.py` |
-| **Integration** | features wired together, "behave like a user" over the HTTP REST API | `api-service/tests/test_tickets_flow.py`, `test_queue_api.py`, `test_forums_gateway.py`, `test_bootstrap.py`, `forum-service/tests/test_threads_flow.py`, `test_posts.py`, `test_boards.py` |
+| **Unit** | one function/class in isolation; tests independent of the impl | `api-service/tests/test_queueing.py` (queue scoring, SLA, aging), `test_security.py` (hashing/JWT), `test_status_transitions.py` (state machine), `ai-service/tests/test_guardrails.py`, `test_fallback.py`, `test_memory.py` (auto-resolve threshold, jailbreak guard, drafted reply) |
+| **Integration** | features wired together, "behave like a user" over the HTTP REST API | `api-service/tests/test_tickets_flow.py`, `test_auto_resolve.py` (long-term memory: an identical ticket is answered by the AI, the agent/AI race, customer reopen), `test_queue_api.py`, `test_forums_gateway.py`, `test_bootstrap.py`, `forum-service/tests/test_threads_flow.py`, `test_posts.py`, `test_boards.py` |
 | **System** | the whole stack end-to-end, closest to "real", hardest to localize | [`System_Tests/test_end_to_end.py`](./System_Tests) → runs `scripts/smoke_test.py` against the live gateway |
 | **Stress** | resilience under many concurrent users / heavy load | [`Stress_Tests/`](./Stress_Tests) — **Locust** swarm, **Apache Bench**, and the `test_concurrent_claims_*` race test |
 | **Security** | try to break in: no-auth, forged tokens, role/data boundaries | [`Security_Tests/test_access_control.py`](./Security_Tests) |
