@@ -90,6 +90,11 @@ services:
       RATE_LIMIT_WRITES: ${RATE_LIMIT_WRITES:-20}
       MAX_REQUEST_BODY_BYTES: ${MAX_REQUEST_BODY_BYTES:-1048576}
       AUTO_RESOLVE_ENABLED: ${AUTO_RESOLVE_ENABLED:-true}
+      UPLOADS_DIR: /data/uploads
+      MAX_IMAGE_BYTES: ${MAX_IMAGE_BYTES:-5242880}
+      MAX_VIDEO_BYTES: ${MAX_VIDEO_BYTES:-26214400}
+    volumes:
+      - uploads_data:/data/uploads
     # Not published: reachable only through Caddy on the private network.
     networks:
       - smartdesk
@@ -101,5 +106,6 @@ networks:
 volumes:
   mongo_data:
   ai_models:
+  uploads_data:
   caddy_data:
   caddy_config:

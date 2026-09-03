@@ -350,15 +350,27 @@ async function viewTicket(v, id) {
   const composer = el(`<div style="margin-top:12px">
     <textarea id="c-body" placeholder="Write a reply…" style="min-height:70px"></textarea>
     ${isStaff() ? '<label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:13px"><input type="checkbox" id="c-internal" style="width:auto">Internal note (hidden from customer)</label>' : ""}
-    <button class="btn sm" id="c-send" style="margin-top:8px">Send reply</button>
+    <div class="row" style="gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
+      <button class="btn sm" id="c-send">Send reply</button>
+      <label class="btn ghost sm" style="cursor:pointer">📎 Attach image/video<input type="file" id="c-file" accept="image/*,video/mp4,video/webm" multiple style="display:none"></label>
+      <span class="muted" id="c-files" style="font-size:12.5px"></span>
+    </div>
   </div>`);
   convo.appendChild(composer);
+  const fileInput = composer.querySelector("#c-file");
+  fileInput.onchange = () => {
+    const names = [...fileInput.files].map((f) => f.name).join(", ");
+    composer.querySelector("#c-files").textContent = names ? `${fileInput.files.length} file(s): ${names}` : "";
+  };
   composer.querySelector("#c-send").onclick = async () => {
     const body = composer.querySelector("#c-body").value.trim();
     if (!body) return;
     try {
-      await api("POST", `/api/tickets/${id}/comments`, { body, internal: composer.querySelector("#c-internal")?.checked || false });
+      const media_urls = [];
+      for (const f of [...fileInput.files].slice(0, 4)) media_urls.push((await uploadFile(f)).url);
+      await api("POST", `/api/tickets/${id}/comments`, { body, internal: composer.querySelector("#c-internal")?.checked || false, media_urls });
       composer.querySelector("#c-body").value = "";
+      fileInput.value = ""; composer.querySelector("#c-files").textContent = "";
       renderComments(cbox, await api("GET", `/api/tickets/${id}/comments`));
     } catch (e) { toast(e.detail, true); }
   };
@@ -382,8 +394,29 @@ function renderComments(box, comments) {
     box.appendChild(el(`<div class="comment ${c.internal ? "internal" : ""} ${isAi ? "ai" : ""}">
       <div class="head"><span>${who}${c.internal ? " · internal note" : ""}</span><span>${timeAgo(c.created_at)}</span></div>
       <div class="body">${esc(c.body)}</div>
+      ${renderMedia(c.media_urls)}
     </div>`));
   }
+}
+
+// Media attachments: only URLs the gateway itself served (/uploads/<id>).
+function renderMedia(urls) {
+  const safe = (urls || []).filter((u) => /^\/uploads\/[a-f0-9]{32}$/.test(u));
+  if (!safe.length) return "";
+  return `<div class="media">${safe.map((u) => `<a href="${u}" target="_blank" rel="noopener"><img src="${u}" alt="attachment" loading="lazy" onerror="this.outerHTML='<video src=&quot;${u}&quot; controls preload=&quot;metadata&quot;></video>'"></a>`).join("")}</div>`;
+}
+
+// Uploads one file through the gateway (type sniffed and size-capped server-side).
+async function uploadFile(file) {
+  const fd = new FormData();
+  fd.append("file", file, file.name);
+  const resp = await fetch("/api/uploads", { method: "POST", headers: state.token ? { Authorization: `Bearer ${state.token}` } : {}, body: fd });
+  if (!resp.ok) {
+    let detail = `Upload failed (${resp.status})`;
+    try { detail = (await resp.json()).detail || detail; } catch {}
+    throw { status: resp.status, detail };
+  }
+  return resp.json();
 }
 
 function memoryCard(t) {

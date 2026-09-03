@@ -67,6 +67,12 @@ services:
       MAX_REQUEST_BODY_BYTES: ${MAX_REQUEST_BODY_BYTES:-1048576}
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
       REQUIRE_STRONG_SECRET: ${REQUIRE_STRONG_SECRET:-false}
+      # Media uploads (images/videos) are streamed to this volume, capped per type.
+      UPLOADS_DIR: /data/uploads
+      MAX_IMAGE_BYTES: ${MAX_IMAGE_BYTES:-5242880}
+      MAX_VIDEO_BYTES: ${MAX_VIDEO_BYTES:-26214400}
+    volumes:
+      - uploads_data:/data/uploads
     ports:
       - "8080:8080"   # The only service exposed to clients.
     networks:
@@ -79,3 +85,4 @@ networks:
 volumes:
   mongo_data:
   ai_models:
+  uploads_data:

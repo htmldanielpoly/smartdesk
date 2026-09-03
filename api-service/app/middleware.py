@@ -19,6 +19,8 @@ from fastapi import HTTPException, status
 
 from app.config import settings
 
+_EXEMPT_PREFIXES = ("/api/uploads",)
+
 
 def _too_large(limit: int) -> HTTPException:
     return HTTPException(
@@ -34,7 +36,9 @@ class BodySizeLimitMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http":
+        if scope["type"] != "http" or scope.get("path", "").startswith(_EXEMPT_PREFIXES):
+            # Media uploads enforce their own, larger, per-type caps while
+            # streaming to disk (see routers/uploads.py).
             await self.app(scope, receive, send)
             return
 

@@ -301,3 +301,7 @@ textarea { resize: vertical; min-height: 96px; }
 .bubble.me { align-self: flex-end; background: var(--primary-soft); }
 .bubble.ai { align-self: flex-start; background: #f6f3ff; border: 1px solid #e2d9ff; }
 .bubble .who { font-size: 11.5px; color: var(--text-muted); margin-bottom: 4px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+
+/* ---------- Media attachments ---------- */
+.media { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.media img, .media video { max-width: 220px; max-height: 160px; border-radius: 8px; border: 1px solid var(--border); display: block; object-fit: cover; }

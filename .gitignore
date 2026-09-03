@@ -23,6 +23,9 @@ env/
 models/
 *.gguf
 
+# Media uploaded through the gateway (local runs outside Docker)
+api-service/uploads/
+
 # IDE / OS
 .idea/
 .vscode/

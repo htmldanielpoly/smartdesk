@@ -226,6 +226,15 @@ The gateway is the only exposed service, so the defences live there
   default; every API body is a small JSON document) are refused with `413`
   before they are read — declared lengths are rejected outright, chunked
   streams are cut off the moment they cross the cap.
+- **Media uploads with real limits.** `POST /api/uploads` accepts images
+  (JPEG, PNG, GIF, WebP) and videos (MP4, WebM) for comments, forum posts and
+  messages. The type is decided by the file's magic bytes, never by the
+  client's claim; images are capped at `MAX_IMAGE_BYTES` (5 MiB) and videos
+  at `MAX_VIDEO_BYTES` (25 MiB), enforced *while the file streams to disk*
+  (a 2 GB "video" is cut off at 25 MiB and never touches memory or Mongo,
+  which only stores a few bytes of metadata). Files are served at
+  `/uploads/<random id>` with `nosniff` and immutable caching, and any
+  `media_urls` on content must reference an upload this gateway stored.
 - **Secrets.** The api-service logs a loud warning when it runs with the
   public example `JWT_SECRET`, and refuses to start with it when
   `REQUIRE_STRONG_SECRET=true` (the production compose file sets this).
@@ -300,8 +309,8 @@ rule-based fallbacks unless you also `pip install -r requirements-llm.txt`
 ## Running tests
 
 ```bash
-cd api-service   && pip install -r requirements-dev.txt && pytest   # 80 tests
-cd ai-service    && pip install -r requirements-dev.txt && pytest   # 105 tests
+cd api-service   && pip install -r requirements-dev.txt && pytest   # 90 tests
+cd ai-service    && pip install -r requirements-dev.txt && pytest   # 107 tests
 cd forum-service && pip install -r requirements-dev.txt && pytest   # 14 tests
 ```
 
@@ -362,7 +371,8 @@ documented step by step in [`deploy/README.md`](deploy/README.md).
 |---|---|
 | Auth | `POST /api/auth/register`, `POST /api/auth/login` |
 | Tickets | `POST/GET /api/tickets`, `GET/PATCH /api/tickets/{id}` (staff: `resolution`), `POST /api/tickets/{id}/assign` |
-| Comments | `GET/POST /api/tickets/{id}/comments` |
+| Comments | `GET/POST /api/tickets/{id}/comments` (with `media_urls`) |
+| Uploads | `POST /api/uploads` (multipart image/video), `GET /uploads/{id}` |
 | AI | `POST /api/assistant/ask` (customer assistant), `POST /api/tickets/{id}/ai/copilot`, `GET /api/tickets/{id}/ai/duplicates`, `GET /api/ai/status` (staff: model state + scheduler stats) |
 | Queue | `GET /api/queue`, `GET /api/queue/stats`, `POST /api/queue/claim` |
 | Incidents | `GET /api/incidents` (staff: complaints clustered into incidents by the local model) |

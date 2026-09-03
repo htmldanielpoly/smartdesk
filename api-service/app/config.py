@@ -58,5 +58,12 @@ class Settings(BaseSettings):
     # Refuse to start with the public default JWT secret (set in production).
     require_strong_secret: bool = False
 
+    # Media uploads (images/videos on posts, comments, messages). Files are
+    # streamed to UPLOADS_DIR and aborted at the per-type cap; the JSON body
+    # cap above does not apply to this route.
+    uploads_dir: str = "uploads"
+    max_image_bytes: int = 5 * 1_048_576  # 5 MiB
+    max_video_bytes: int = 25 * 1_048_576  # 25 MiB
+
 
 settings = Settings()

@@ -7,6 +7,7 @@ from app.database import get_db
 from app.deps import get_current_user
 from app.models.enums import Role, TicketStatus
 from app.rate_limit import rate_limit_writes
+from app.routers.uploads import upload_exists
 from app.schemas.comment import CommentCreate, CommentOut
 from app.services import activity
 from app.services.serializers import serialize_comment
@@ -57,6 +58,13 @@ async def add_comment(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     internal = payload.internal and _is_staff(user)  # only staff may post internal notes
+    # Media must be something this gateway stored: no external or scripted URLs.
+    for url in payload.media_urls:
+        if not await upload_exists(url):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="media_urls must reference files uploaded via /api/uploads",
+            )
     now = datetime.now(UTC)
     doc = {
         "ticketId": ticket["_id"],
@@ -64,6 +72,7 @@ async def add_comment(
         "authorType": "user",
         "body": payload.body,
         "internal": internal,
+        "mediaUrls": list(dict.fromkeys(payload.media_urls)),
         "createdAt": now,
     }
     result = await get_db().comments.insert_one(doc)

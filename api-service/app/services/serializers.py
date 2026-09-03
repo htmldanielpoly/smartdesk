@@ -51,5 +51,6 @@ def serialize_comment(doc: dict) -> dict:
         "author_type": doc.get("authorType", "user"),
         "body": doc["body"],
         "internal": doc.get("internal", False),
+        "media_urls": doc.get("mediaUrls", []),
         "created_at": doc["createdAt"],
     }
