@@ -199,9 +199,11 @@ function backBtn(label, view, arg) {
 }
 
 /* ---------- Tickets ---------- */
+const PAGE_SIZE = 50;
+
 async function viewTickets(v) {
   let tickets;
-  try { tickets = await api("GET", "/api/tickets"); }
+  try { tickets = await api("GET", `/api/tickets?limit=${PAGE_SIZE}`); }
   catch (e) { return renderError(v, e); }
 
   v.innerHTML = "";
@@ -216,12 +218,30 @@ async function viewTickets(v) {
     return;
   }
   const list = el('<div class="list"></div>');
-  for (const t of tickets) {
+  const addRows = (batch) => batch.forEach((t) => list.appendChild(ticketRow(t)));
+  addRows(tickets);
+  v.appendChild(list);
+  if (tickets.length === PAGE_SIZE) {
+    const more = el('<button class="btn ghost" style="margin-top:12px">Load more</button>');
+    let skip = PAGE_SIZE;
+    more.onclick = async () => {
+      try {
+        const batch = await api("GET", `/api/tickets?limit=${PAGE_SIZE}&skip=${skip}`);
+        addRows(batch); skip += batch.length;
+        if (batch.length < PAGE_SIZE) more.remove();
+      } catch (e) { toast(e.detail, true); }
+    };
+    v.appendChild(more);
+  }
+}
+
+function ticketRow(t) {
     const pr = t.priority || t.ai_suggested?.priority;
+    const who = isStaff() && t.created_by_name ? ` · ${esc(t.created_by_name)}` : "";
     const row = el(`<div class="item">
       <div class="grow">
         <div class="title">${esc(t.title)}</div>
-        <div class="sub">#${t.id.slice(-6)} · ${esc(t.category || t.ai_suggested?.category || "unclassified")} · opened ${timeAgo(t.created_at)}</div>
+        <div class="sub">#${t.id.slice(-6)}${who} · ${esc(t.category || t.ai_suggested?.category || "unclassified")} · opened ${timeAgo(t.created_at)}</div>
       </div>
       ${isThreat(t.ai_suggested?.flags) ? '<span class="badge threat" title="The ticket text tried to manipulate the AI; it was handled by rules and routed to a human">⚠ jailbreak</span>' : ""}
       ${t.auto_resolved && !t.auto_resolved.reopened_at ? '<span class="badge ai" title="Answered by the AI from a previously resolved ticket">🧠 AI answered</span>' : ""}
@@ -229,9 +249,7 @@ async function viewTickets(v) {
       <span class="badge ${t.status}">${t.status.replace("_", " ")}</span>
     </div>`);
     row.onclick = () => navigate("ticket", t.id);
-    list.appendChild(row);
-  }
-  v.appendChild(list);
+    return row;
 }
 
 // Customer-facing assistant: answers from long-term memory or the knowledge
@@ -333,7 +351,7 @@ async function viewTicket(v, id) {
       <h2 style="font-size:19px">${esc(t.title)}</h2>
       <span class="badge ${t.status}">${t.status.replace("_", " ")}</span>
     </div>
-    <div class="muted" style="margin-bottom:12px">#${t.id.slice(-6)} · opened ${timeAgo(t.created_at)} ${aiBadge}</div>
+    <div class="muted" style="margin-bottom:12px">#${t.id.slice(-6)}${t.created_by_name ? ` · by ${esc(t.created_by_name)}` : ""} · opened ${timeAgo(t.created_at)} ${aiBadge}</div>
     <div style="white-space:pre-wrap">${esc(t.description)}</div>
   </div>`));
 
@@ -390,7 +408,7 @@ function renderComments(box, comments) {
   for (const c of comments) {
     const isAi = c.author_type === "ai";
     const me = !isAi && c.author_id === state.userId;
-    const who = isAi ? "🤖 SmartDesk AI · answered from memory" : me ? "You" : String(c.author_id || "").slice(-6);
+    const who = isAi ? "🤖 SmartDesk AI · answered from memory" : me ? "You" : esc(c.author_name || String(c.author_id || "").slice(-6));
     box.appendChild(el(`<div class="comment ${c.internal ? "internal" : ""} ${isAi ? "ai" : ""}">
       <div class="head"><span>${who}${c.internal ? " · internal note" : ""}</span><span>${timeAgo(c.created_at)}</span></div>
       <div class="body">${esc(c.body)}</div>
@@ -461,7 +479,7 @@ function ticketMetaCard(t) {
   list.appendChild(el(`<div><div class="k">Priority</div><div class="v">${pr ? `<span class="badge ${pr}">${pr}</span>` : "—"}</div></div>`));
   list.appendChild(el(`<div><div class="k">Category</div><div class="v">${esc(cat || "—")}</div></div>`));
   list.appendChild(el(`<div><div class="k">Department</div><div class="v">${esc(t.department || t.ai_suggested?.department || "—")}</div></div>`));
-  list.appendChild(el(`<div><div class="k">Assigned</div><div class="v">${t.assigned_agent ? t.assigned_agent.slice(-6) : "Unassigned"}</div></div>`));
+  list.appendChild(el(`<div><div class="k">Assigned</div><div class="v">${t.assigned_agent ? esc(t.assigned_agent_name || t.assigned_agent.slice(-6)) : "Unassigned"}</div></div>`));
   if (t.resolution && !isStaff()) list.appendChild(el(`<div><div class="k">Resolution</div><div class="resolution-box">${esc(t.resolution)}</div></div>`));
 
   if (isStaff()) {

@@ -14,6 +14,7 @@ class CommentOut(BaseModel):
     id: str
     ticket_id: str
     author_id: str | None  # None for AI-authored replies
+    author_name: str | None = None  # display name, or "SmartDesk AI"
     author_type: str = "user"  # "user" | "ai"
     body: str
     internal: bool

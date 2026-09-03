@@ -24,14 +24,17 @@ def _serialize_auto_resolved(info: dict | None) -> dict | None:
     }
 
 
-def serialize_ticket(doc: dict) -> dict:
+def serialize_ticket(doc: dict, names: dict | None = None) -> dict:
+    names = names or {}
     return {
         "id": str(doc["_id"]),
         "title": doc["title"],
         "description": doc["description"],
         "status": doc["status"],
         "created_by": str(doc["createdBy"]),
+        "created_by_name": names.get(doc["createdBy"]),
         "assigned_agent": str(doc["assignedAgent"]) if doc.get("assignedAgent") else None,
+        "assigned_agent_name": names.get(doc.get("assignedAgent")),
         "category": doc.get("category"),
         "priority": doc.get("priority"),
         "department": doc.get("department"),
@@ -43,11 +46,14 @@ def serialize_ticket(doc: dict) -> dict:
     }
 
 
-def serialize_comment(doc: dict) -> dict:
+def serialize_comment(doc: dict, names: dict | None = None) -> dict:
+    names = names or {}
+    author_id = doc.get("authorId")
     return {
         "id": str(doc["_id"]),
         "ticket_id": str(doc["ticketId"]),
-        "author_id": str(doc["authorId"]) if doc.get("authorId") else None,
+        "author_id": str(author_id) if author_id else None,
+        "author_name": "SmartDesk AI" if doc.get("authorType") == "ai" else names.get(author_id),
         "author_type": doc.get("authorType", "user"),
         "body": doc["body"],
         "internal": doc.get("internal", False),

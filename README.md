@@ -309,7 +309,7 @@ rule-based fallbacks unless you also `pip install -r requirements-llm.txt`
 ## Running tests
 
 ```bash
-cd api-service   && pip install -r requirements-dev.txt && pytest   # 90 tests
+cd api-service   && pip install -r requirements-dev.txt && pytest   # 94 tests
 cd ai-service    && pip install -r requirements-dev.txt && pytest   # 107 tests
 cd forum-service && pip install -r requirements-dev.txt && pytest   # 14 tests
 ```
@@ -370,7 +370,7 @@ documented step by step in [`deploy/README.md`](deploy/README.md).
 | Area | Endpoints |
 |---|---|
 | Auth | `POST /api/auth/register`, `POST /api/auth/login` |
-| Tickets | `POST/GET /api/tickets`, `GET/PATCH /api/tickets/{id}` (staff: `resolution`), `POST /api/tickets/{id}/assign` |
+| Tickets | `POST/GET /api/tickets` (`?limit&skip&status`, total in `X-Total-Count`), `GET/PATCH /api/tickets/{id}` (staff: `resolution`), `POST /api/tickets/{id}/assign` |
 | Comments | `GET/POST /api/tickets/{id}/comments` (with `media_urls`) |
 | Uploads | `POST /api/uploads` (multipart image/video), `GET /uploads/{id}` |
 | AI | `POST /api/assistant/ask` (customer assistant), `POST /api/tickets/{id}/ai/copilot`, `GET /api/tickets/{id}/ai/duplicates`, `GET /api/ai/status` (staff: model state + scheduler stats) |
