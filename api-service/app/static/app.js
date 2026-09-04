@@ -80,6 +80,62 @@ async function api(method, path, body) {
   return data;
 }
 
+
+
+
+async function uploadFile(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  const headers = {};
+  if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  const resp = await fetch("/api/forums/upload", { method: "POST", headers, body: formData });
+  let data = null;
+  try { data = await resp.json(); } catch { /* empty */ }
+  if (!resp.ok) throw { status: resp.status, detail: data?.detail || "Upload failed" };
+  return data.url;
+}
+
+function mediaPreviewHtml(urls) {
+  if (!urls || !urls.length) return "";
+  return `<div class="media-preview" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+    ${urls.map(u => u.match(/\.(mp4|webm)$/i)
+      ? `<video src="${u}" controls style="max-width:200px;max-height:200px;border-radius:8px"></video>`
+      : `<img src="${u}" style="max-width:200px;max-height:200px;border-radius:8px;object-fit:cover" />`
+    ).join("")}
+  </div>`;
+}
+
+function composerMediaPreviewHtml(items) {
+  if (!items || !items.length) {
+    return `<div class="media-preview-empty" style="font-size:13px;color:var(--text-muted);margin-top:6px">No file chosen</div>`;
+  }
+  return `<div class="media-preview" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+    ${items.map((item, i) => `
+      <div style="display:flex;flex-direction:column;align-items:center;max-width:200px">
+        <div style="position:relative;display:inline-block">
+          ${item.url.match(/\.(mp4|webm)$/i)
+            ? `<video src="${item.url}" controls style="max-width:200px;max-height:200px;border-radius:8px"></video>`
+            : `<img src="${item.url}" style="max-width:200px;max-height:200px;border-radius:8px;object-fit:cover" />`
+          }
+          <button type="button" class="media-remove-btn" data-idx="${i}" style="
+            position:absolute; top:4px; right:4px;
+            width:22px; height:22px;
+            border-radius:50%;
+            border:none;
+            background:rgba(0,0,0,0.6);
+            color:#fff;
+            font-size:14px;
+            line-height:1;
+            cursor:pointer;
+            display:flex; align-items:center; justify-content:center;
+          ">✕</button>
+        </div>
+        <span style="font-size:12px;color:var(--text-muted);margin-top:4px;word-break:break-all;text-align:center">${esc(item.name)}</span>
+      </div>
+    `).join("")}
+  </div>`;
+}
+
 /* ---------- auth ---------- */
 function setSession(token, role) {
   const claims = decodeJwt(token);
@@ -654,26 +710,65 @@ function openThreadComposer(v, slug) {
     <h3 style="margin-top:0">New thread</h3>
     <label class="field"><span>Title</span><input id="th-title" maxlength="160" /></label>
     <label class="field"><span>Message</span><textarea id="th-body" maxlength="5000"></textarea></label>
-    
-    <!-- ADDED: Anonymous Checkbox -->
     <label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:13px">
       <input type="checkbox" id="th-anon" style="width:auto">Post anonymously
     </label>
-    
+    <label style="display:block;margin:8px 0;font-size:13px">
+      <span style="color:var(--text-muted)">Attach image/video (max 10MB)</span>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:4px">
+        <button type="button" class="btn ghost sm" id="th-file-btn">Choose File</button>
+        <span id="th-file-status" style="color:var(--text-muted);font-size:13px">No file chosen</span>
+      </div>
+      <input type="file" id="th-file" accept="image/*,video/mp4,video/webm" style="display:none" />
+    </label>
+    <div id="th-media-preview"></div>
     <div class="err-text" id="th-err"></div>
     <button class="btn" id="th-post">Post thread</button>
   </div>`);
   v.querySelector(".page-head").after(modal);
 
+  const thMedia = [];
+
+  function renderThMediaPreview() {
+    const box = modal.querySelector("#th-media-preview");
+    box.innerHTML = composerMediaPreviewHtml(thMedia.map(m => ({ url: `/api/forums${m.url}`, name: m.name })));
+    box.querySelectorAll(".media-remove-btn").forEach(btn => {
+      btn.onclick = () => {
+        thMedia.splice(Number(btn.dataset.idx), 1);
+        renderThMediaPreview();
+      };
+    });
+    modal.querySelector("#th-file-status").textContent =
+      thMedia.length ? `${thMedia.length} file${thMedia.length > 1 ? "s" : ""} attached` : "No file chosen";
+  }
+  renderThMediaPreview();
+
+  modal.querySelector("#th-file-btn").onclick = () => modal.querySelector("#th-file").click();
+
+  modal.querySelector("#th-file").onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    modal.querySelector("#th-err").textContent = "";
+    try {
+      toast("Uploading...");
+      const url = await uploadFile(file);
+      thMedia.push({ url, name: file.name });
+      renderThMediaPreview();
+      toast("File attached.");
+    } catch (err) {
+      modal.querySelector("#th-err").textContent = err.detail || "Upload failed";
+    } finally {
+      e.target.value = "";
+    }
+  };
+
   modal.querySelector("#th-post").onclick = async () => {
     const title = modal.querySelector("#th-title").value.trim();
     const body = modal.querySelector("#th-body").value.trim();
-    const is_anonymous = modal.querySelector("#th-anon").checked; // ADDED
-
+    const is_anonymous = modal.querySelector("#th-anon").checked;
     if (!title || !body) { modal.querySelector("#th-err").textContent = "Title and message required."; return; }
     try {
-      // ADDED is_anonymous to the payload
-      const th = await api("POST", `/api/forums/boards/${slug}/threads`, { title, body, is_anonymous });
+      const th = await api("POST", `/api/forums/boards/${slug}/threads`, { title, body, is_anonymous, media_urls: thMedia.map(m => m.url) });
       toast("Thread posted");
       navigate("thread", th.id);
     }
@@ -722,6 +817,7 @@ async function viewThread(v, id) {
   };
   head.appendChild(engageBar);
 
+
   if (isStaff()) {
     const mod = el('<div class="row" style="flex:0 0 auto;gap:8px;margin-top:10px;"></div>');
     const lock = el(`<button class="btn ghost sm">${th.locked ? "Unlock" : "Lock"}</button>`);
@@ -754,6 +850,7 @@ async function viewThread(v, id) {
         <span>${timeAgo(p.created_at)}</span>
       </div>
       <div style="white-space:pre-wrap">${p.deleted ? '<em class="muted">[deleted]</em>' : esc(p.body)}</div>
+      ${!p.deleted && p.media_urls && p.media_urls.length ? mediaPreviewHtml(p.media_urls.map(u => `/api/forums${u}`)) : ""}
       
       ${!p.deleted ? `
       <div class="engagement-bar">
@@ -790,7 +887,7 @@ async function viewThread(v, id) {
   v.appendChild(stack);
 
   // 3. REPLY COMPOSER
-  if (!th.locked) {
+    if (!th.locked) {
     const reply = el(`<div class="card card-pad" style="margin-top:14px">
       <textarea id="rp-body" placeholder="Write a reply…"></textarea>
       
@@ -798,8 +895,55 @@ async function viewThread(v, id) {
         <input type="checkbox" id="rp-anon" style="width:auto">Post anonymously
       </label>
       
+      <label style="display:block;margin:8px 0;font-size:13px">
+        <span style="color:var(--text-muted)">Attach image/video (max 10MB)</span>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:4px">
+          <button type="button" class="btn ghost sm" id="rp-file-btn">Choose File</button>
+          <span id="rp-file-status" style="color:var(--text-muted);font-size:13px">No file chosen</span>
+        </div>
+        <input type="file" id="rp-file" accept="image/*,video/mp4,video/webm" style="display:none" />
+      </label>
+      <div id="rp-media-preview"></div>
+      <div class="err-text" id="rp-err"></div>
+
       <button class="btn sm" id="rp-send" style="margin-top:10px">Reply</button>
     </div>`);
+
+
+    const rpMedia = [];
+
+    function renderRpMediaPreview() {
+      const box = reply.querySelector("#rp-media-preview");
+      box.innerHTML = composerMediaPreviewHtml(rpMedia.map(m => ({ url: `/api/forums${m.url}`, name: m.name })));
+      box.querySelectorAll(".media-remove-btn").forEach(btn => {
+        btn.onclick = () => {
+          rpMedia.splice(Number(btn.dataset.idx), 1);
+          renderRpMediaPreview();
+        };
+      });
+      reply.querySelector("#rp-file-status").textContent =
+        rpMedia.length ? `${rpMedia.length} file${rpMedia.length > 1 ? "s" : ""} attached` : "No file chosen";
+    }
+    renderRpMediaPreview();
+
+    reply.querySelector("#rp-file-btn").onclick = () => reply.querySelector("#rp-file").click();
+
+    reply.querySelector("#rp-file").onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      reply.querySelector("#rp-err").textContent = "";
+      try {
+        toast("Uploading...");
+        const url = await uploadFile(file);
+        rpMedia.push({ url, name: file.name });
+        renderRpMediaPreview();
+        toast("File attached.");
+      } catch (err) {
+        reply.querySelector("#rp-err").textContent = err.detail || "Upload failed";
+      } finally {
+        e.target.value = "";
+      }
+    };
 
     reply.querySelector("#rp-send").onclick = async () => {
       const body = reply.querySelector("#rp-body").value.trim();
@@ -807,7 +951,7 @@ async function viewThread(v, id) {
 
       if (!body) return;
       try {
-        await api("POST", `/api/forums/threads/${id}/posts`, { body, is_anonymous });
+        await api("POST", `/api/forums/threads/${id}/posts`, { body, is_anonymous, media_urls: rpMedia.map(m => m.url) });
         navigate("thread", id);
       }
       catch (e) { toast(e.detail, true); }
