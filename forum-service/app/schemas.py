@@ -43,7 +43,7 @@ class ThreadPage(BaseModel):
     total: int
 
 class PostCreate(BaseModel):
-    body: str = Field(min_length=1, max_length=5000)
+    body: str = Field(default="", max_length=5000)
     media_urls: list[str] = Field(default_factory=list)
     is_anonymous: bool = Field(default=False)
 
@@ -69,7 +69,7 @@ class ThreadDetail(BaseModel):
 
 class DirectMessageCreate(BaseModel):
     recipient_id: str
-    content: str = Field(min_length=1, max_length=2000)
+    content: str = Field(default="", max_length=2000)
     media_urls: list[str] = Field(default_factory=list)
 
 class DirectMessageOut(BaseModel):

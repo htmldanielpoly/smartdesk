@@ -107,7 +107,7 @@ function mediaPreviewHtml(urls) {
 
 function composerMediaPreviewHtml(items) {
   if (!items || !items.length) {
-    return `<div class="media-preview-empty" style="font-size:13px;color:var(--text-muted);margin-top:6px">No file chosen</div>`;
+    return "";
   }
   return `<div class="media-preview" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
     ${items.map((item, i) => `
@@ -165,6 +165,7 @@ function showApp() {
   $("#user-avatar").textContent = initials(state.name);
 
   connectWebSocket(); // ADDED: Start listening for live messages
+  loadUserDirectory();
   buildNav();
   navigate(isStaff() ? "queue" : "tickets");
 }
@@ -949,7 +950,7 @@ async function viewThread(v, id) {
       const body = reply.querySelector("#rp-body").value.trim();
       const is_anonymous = reply.querySelector("#rp-anon").checked;
 
-      if (!body) return;
+      if (!body && !rpMedia.length) { toast("Write something or attach a file first.", true); return; }
       try {
         await api("POST", `/api/forums/threads/${id}/posts`, { body, is_anonymous, media_urls: rpMedia.map(m => m.url) });
         navigate("thread", id);
@@ -1006,10 +1007,11 @@ async function viewMessages(v, activeUserId = null) {
   v.innerHTML = "";
   v.appendChild(el(`<div class="page-head"><h2>Direct Messages</h2></div>`));
 
-  // Fetch all users so ANY client can message ANY client
   let allUsers = [];
   try {
     allUsers = await api("GET", "/api/auth/directory"); // Targeted to the auth router
+    state.userDirectory = {};
+    for (const u of allUsers) state.userDirectory[u.id] = u.display_name;
   } catch (e) {
     console.warn("Could not load user directory.");
   }
@@ -1040,9 +1042,17 @@ async function viewMessages(v, activeUserId = null) {
       <div class="chat-history" id="chat-history">
         <div class="empty"><div class="big">✉️</div>Select a conversation to start chatting.</div>
       </div>
-      <div class="chat-input-area" id="chat-input-area" style="display:none;">
-        <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off" />
-        <button class="btn" id="chat-send">Send</button>
+      <div class="chat-input-area" id="chat-input-area" style="display:none; flex-direction:column; gap:6px;">
+        <div id="dm-media-preview"></div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <button type="button" class="btn ghost sm" id="dm-file-btn">Attach</button>
+          <span id="dm-file-status" style="color:var(--text-muted); font-size:12px;">No file chosen</span>
+        </div>
+        <input type="file" id="dm-file" accept="image/*,video/mp4,video/webm" style="display:none" />
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off" />
+          <button class="btn" id="chat-send">Send</button>
+        </div>
       </div>
     </div>
   </div>`);
@@ -1050,6 +1060,40 @@ async function viewMessages(v, activeUserId = null) {
   const contactList = layout.querySelector("#contact-list");
   const historyBox = layout.querySelector("#chat-history");
   const inputArea = layout.querySelector("#chat-input-area");
+
+  const dmMedia = [];
+
+  function renderDmMediaPreview() {
+    const box = layout.querySelector("#dm-media-preview");
+    box.innerHTML = composerMediaPreviewHtml(dmMedia.map(m => ({ url: `/api/forums${m.url}`, name: m.name })));
+    box.querySelectorAll(".media-remove-btn").forEach(btn => {
+      btn.onclick = () => {
+        dmMedia.splice(Number(btn.dataset.idx), 1);
+        renderDmMediaPreview();
+      };
+    });
+    layout.querySelector("#dm-file-status").textContent =
+      dmMedia.length ? `${dmMedia.length} file${dmMedia.length > 1 ? "s" : ""} attached` : "No file chosen";
+  }
+  renderDmMediaPreview();
+
+  layout.querySelector("#dm-file-btn").onclick = () => layout.querySelector("#dm-file").click();
+
+  layout.querySelector("#dm-file").onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      toast("Uploading...");
+      const url = await uploadFile(file);
+      dmMedia.push({ url, name: file.name });
+      renderDmMediaPreview();
+      toast("File attached.");
+    } catch (err) {
+      toast(err.detail || "Upload failed", true);
+    } finally {
+      e.target.value = "";
+    }
+  };
 
   // Handle the dropdown Chat button
   layout.querySelector("#btn-new-chat").onclick = () => {
@@ -1086,6 +1130,7 @@ async function viewMessages(v, activeUserId = null) {
           historyBox.appendChild(el(`
             <div class="chat-bubble ${isMe ? 'me' : 'them'}">
               <div class="text">${esc(m.content)}</div>
+              ${m.media_urls && m.media_urls.length ? mediaPreviewHtml(m.media_urls.map(u => `/api/forums${u}`)) : ""}
               <div class="time">${timeAgo(m.created_at)}</div>
             </div>
           `));
@@ -1095,24 +1140,42 @@ async function viewMessages(v, activeUserId = null) {
 
       layout.querySelector("#chat-send").onclick = async () => {
         const content = layout.querySelector("#chat-input").value.trim();
-        if (!content) return;
-        try {
-          await api("POST", `/api/forums/messages`, { recipient_id: activeUserId, content });
+        if (!content && !dmMedia.length) { toast("Write something or attach a file first.", true); return; }        try {
+          const media_urls = dmMedia.map(m => m.url);
+          await api("POST", `/api/forums/messages`, { recipient_id: activeUserId, content, media_urls });
           layout.querySelector("#chat-input").value = "";
-          const isMe = true;
           historyBox.appendChild(el(`
             <div class="chat-bubble me">
               <div class="text">${esc(content)}</div>
+              ${media_urls.length ? mediaPreviewHtml(media_urls.map(u => `/api/forums${u}`)) : ""}
               <div class="time">just now</div>
             </div>
             `));
           historyBox.scrollTop = historyBox.scrollHeight;
+          dmMedia.length = 0;
+          renderDmMediaPreview();
         } catch (e) { toast(e.detail, true); }
       };
     } catch (e) { historyBox.innerHTML = `<p class="err-text">${esc(e.detail)}</p>`; }
   }
 }
 
+
+
+/* ---------- User directory (for resolving IDs to names in notifications) ---------- */
+async function loadUserDirectory() {
+  try {
+    const users = await api("GET", "/api/auth/directory");
+    state.userDirectory = {};
+    for (const u of users) state.userDirectory[u.id] = u.display_name;
+  } catch (e) {
+    console.warn("Could not load user directory for notifications.");
+  }
+}
+
+function nameForUserId(id) {
+  return (state.userDirectory && state.userDirectory[id]) || "Someone";
+}
 
 
 /* ---------- Live WebSockets ---------- */
@@ -1142,19 +1205,20 @@ function connectWebSocket() {
             historyBox.appendChild(el(`
               <div class="chat-bubble them">
                 <div class="text">${esc(dm.content)}</div>
+                ${dm.media_urls && dm.media_urls.length ? mediaPreviewHtml(dm.media_urls.map(u => `/api/forums${u}`)) : ""}
                 <div class="time">just now</div>
               </div>
             `));
             historyBox.scrollTop = historyBox.scrollHeight;
           } else if (dm.sender_id) {
-            toast("📩 New direct message received!");
+            toast(`📩 New message from ${nameForUserId(dm.sender_id)}`);
           }
         } else if (msg.type === "like_notification") {
           const n = msg.data;
           const action = n.action === "like" ? "👍" : "👎";
           const kind = n.kind === "thread" ? "your thread" : "your reply";
           const label = n.title ? `"${n.title.slice(0, 40)}"` : kind;
-          toast(`${action} Someone ${n.action}d ${label}`);
+          toast(`${action} ${nameForUserId(n.by_user)} ${n.action}d ${label}`);
         }
     } catch (err) {
         console.error("[WS] Failed to parse message:", err);

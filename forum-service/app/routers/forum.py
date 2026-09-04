@@ -172,6 +172,9 @@ async def create_post(
     if thread.get("locked", False):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Thread is locked")
 
+    if not payload.body.strip() and not payload.media_urls:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Post must include text or an attachment")
+
     now = datetime.now(UTC)
     doc = {
         "threadId": thread["_id"],
@@ -339,6 +342,9 @@ async def create_direct_message(
         _: None = Depends(rate_limit_message),
 ):
     """Sends a direct message to another user."""
+    if not payload.content.strip() and not payload.media_urls:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message must include text or an attachment")
+
     doc = {
         "sender_id": user["id"],
         "recipient_id": payload.recipient_id,
