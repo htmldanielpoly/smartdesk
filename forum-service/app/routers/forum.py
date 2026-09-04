@@ -244,7 +244,7 @@ async def like_thread(thread_id: str, user: dict = Depends(get_current_user)):
     )
     # Notify thread owner if someone else liked it
     owner_id = thread.get("authorId")
-    if owner_id and owner_id != user["id"] and not thread.get("isAnonymous"):
+    if owner_id and owner_id != user["id"]:
         await manager.send_personal_message({
             "type": "like_notification",
             "data": {
@@ -266,7 +266,7 @@ async def dislike_thread(thread_id: str, user: dict = Depends(get_current_user))
         {"$addToSet": {"dislikes": user["id"]}, "$pull": {"likes": user["id"]}}
     )
     owner_id = thread.get("authorId")
-    if owner_id and owner_id != user["id"] and not thread.get("isAnonymous"):
+    if owner_id and owner_id != user["id"] :
         await manager.send_personal_message({
             "type": "like_notification",
             "data": {
@@ -288,7 +288,7 @@ async def like_post(post_id: str, user: dict = Depends(get_current_user)):
         {"$addToSet": {"likes": user["id"]}, "$pull": {"dislikes": user["id"]}}
     )
     owner_id = post.get("authorId")
-    if owner_id and owner_id != user["id"] and not post.get("isAnonymous"):
+    if owner_id and owner_id != user["id"] :
         await manager.send_personal_message({
             "type": "like_notification",
             "data": {
@@ -309,7 +309,7 @@ async def dislike_post(post_id: str, user: dict = Depends(get_current_user)):
         {"$addToSet": {"dislikes": user["id"]}, "$pull": {"likes": user["id"]}}
     )
     owner_id = post.get("authorId")
-    if owner_id and owner_id != user["id"] and not post.get("isAnonymous"):
+    if owner_id and owner_id != user["id"] :
         await manager.send_personal_message({
             "type": "like_notification",
             "data": {

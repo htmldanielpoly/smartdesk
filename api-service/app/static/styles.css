@@ -75,7 +75,7 @@ a { color: var(--primary); text-decoration: none; }
 }
 
 /* ---------- App shell ---------- */
-.app { display: none; min-height: 100vh; }
+.app { display: none; height: 100vh; }
 .app.active { display: grid; grid-template-columns: var(--sidebar-w) 1fr; }
 
 .sidebar {
@@ -85,6 +85,8 @@ a { color: var(--primary); text-decoration: none; }
   display: flex;
   flex-direction: column;
   gap: 4px;
+  height: 100vh;
+  overflow-y: auto;
 }
 .sidebar .brand { color: #fff; padding: 6px 8px 22px; }
 .nav-item {
@@ -102,8 +104,7 @@ a { color: var(--primary); text-decoration: none; }
 .nav-spacer { flex: 1; }
 .nav-foot { font-size: 12px; color: #7d8ba6; padding: 8px; }
 
-.main { display: flex; flex-direction: column; min-width: 0; }
-.topbar {
+.main { display: flex; flex-direction: column; min-width: 0; height: 100vh; overflow-y: auto; }.topbar {
   height: 60px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
