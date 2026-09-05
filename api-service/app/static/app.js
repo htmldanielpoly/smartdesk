@@ -671,14 +671,24 @@ async function viewForums(v) {
   v.innerHTML = "";
   v.appendChild(el(`<div class="page-head"><h2>Community forums</h2></div>`));
   const list = el('<div class="list"></div>');
+  const counts = {};
   for (const b of boards) {
+    counts[b.slug] = b.thread_count;
     const row = el(`<div class="item">
-      <div class="grow"><div class="title">${esc(b.name)}</div><div class="sub">${esc(b.category)} · ${b.thread_count} thread${b.thread_count === 1 ? "" : "s"}</div></div>→
+      <div class="grow"><div class="title">${esc(b.name)}</div><div class="sub" id="forum-row-count-${b.slug}">${esc(b.category)} · ${b.thread_count} post${b.thread_count === 1 ? "" : "s"}</div></div>→
     </div>`);
     row.onclick = () => navigate("board", b.slug);
     list.appendChild(row);
   }
   v.appendChild(list);
+
+  window.forumsLiveIncrement = (boardSlug) => {
+    const countEl = document.getElementById(`forum-row-count-${boardSlug}`);
+    if (!countEl) return;
+    counts[boardSlug] = (counts[boardSlug] || 0) + 1;
+    const board = boards.find(x => x.slug === boardSlug);
+    countEl.innerHTML = `${board ? esc(board.category) : ""} · ${counts[boardSlug]} post${counts[boardSlug] === 1 ? "" : "s"}`;
+  };
 }
 
 async function viewBoard(v, slug) {
@@ -895,7 +905,7 @@ async function viewThread(v, id) {
     const canDel = !p.deleted && (me || isStaff());
 
     // Safely handle null author_ids and roles for anonymous posts
-    const authorName = p.is_anonymous ? "Anonymous" : (me ? "You" : (p.author_id ? p.author_id.slice(-6) : "Unknown"));
+    const authorName = p.is_anonymous ? "Anonymous" : (me ? "You" : (p.author_id ? nameForUserId(p.author_id) : "Unknown"));
     const roleBadge = p.author_role ? `<span class="badge soft">${p.author_role}</span>` : "";
 
     let hasLiked = (p.likes || []).includes(state.userId);
@@ -969,7 +979,7 @@ async function viewThread(v, id) {
       d.onclick = async () => {
         try {
           await api("DELETE", `/api/forums/posts/${p.id}`);
-          toast("Post deleted");
+          toast("Reply deleted");
           const bodyEl = post.querySelector(`#post-body-${p.id}`);
           if (bodyEl) bodyEl.innerHTML = '<em class="muted">[deleted]</em>';
           const mediaEl = post.querySelector(`#post-media-${p.id}`);
@@ -1370,6 +1380,9 @@ function connectWebSocket() {
         } else if (msg.type === "new_thread") {
           if (currentView === "board" && String(window.currentBoardSlug) === String(msg.data.board_slug) && window.boardLiveAddThread) {
             window.boardLiveAddThread(msg.data);
+          }
+          if (currentView === "forums" && window.forumsLiveIncrement) {
+            window.forumsLiveIncrement(msg.data.board_slug);
           }
         }
     } catch (err) {
