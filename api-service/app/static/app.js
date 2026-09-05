@@ -1349,6 +1349,8 @@ async function viewMessages(v, activeUserId = null) {
           const media_urls = dmMedia.map(m => m.url);
           await api("POST", `/api/forums/messages`, { recipient_id: activeUserId, content, media_urls });
           layout.querySelector("#chat-input").value = "";
+          const emptyPlaceholder = historyBox.querySelector(".empty");
+          if (emptyPlaceholder) emptyPlaceholder.remove();
           const bubble = el(`
             <div class="chat-bubble me">
               <div class="text">${esc(content)}</div>
