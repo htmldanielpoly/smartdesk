@@ -1,0 +1,14 @@
+# Test-only override — NOT loaded automatically by `docker compose up`.
+#
+# Enables forum-service's env-gated debug introspection route
+# (GET /debug/ws-connections/{user_id}, see forum-service/app/routers/forum.py)
+# so tests/Security_Tests/test_websocket_disconnect_cleans_up_connection.py can
+# observe ConnectionManager state. Never merge this into docker-compose.yml's
+# defaults — the route must stay off (404) in any normal deployment.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build
+services:
+  forum-service:
+    environment:
+      ENABLE_TEST_ENDPOINTS: "true"

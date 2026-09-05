@@ -26,6 +26,18 @@ tests/
 | **Security** | try to break in: no-auth, forged tokens, role/data boundaries | [`Security_Tests/test_access_control.py`](./Security_Tests) |
 | **Regression** | re-run everything on every change (CI) | `.github/workflows/ci.yml` runs the whole suite on every push |
 
+## Test-only endpoints
+
+`forum-service` has one route that exists purely for tests: `GET
+/debug/ws-connections/{user_id}` (in `forum-service/app/routers/forum.py`),
+which reports how many live WebSocket connections `ConnectionManager` holds
+for a user — used by
+[`Security_Tests/test_websocket_disconnect_cleans_up_connection.py`](./Security_Tests)
+to check that a disconnect actually gets cleaned up. It 404s unless
+`ENABLE_TEST_ENDPOINTS=true`, which is never set in `docker-compose.yml`'s
+defaults — only via `docker-compose.test.yml` (see that file for the exact
+command). In any normal deployment this route does not respond.
+
 ## Running it all
 
 ```bash

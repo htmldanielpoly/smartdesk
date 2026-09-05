@@ -529,4 +529,24 @@ async def websocket_endpoint(
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
+        pass
+    finally:
         manager.disconnect(websocket, user["id"])
+
+
+# --- Test-only introspection (see tests/README.md) ---
+
+@router.get("/debug/ws-connections/{user_id}")
+async def debug_ws_connection_count(user_id: str):
+    """Read-only ConnectionManager introspection, for tests only.
+
+    404s unless ENABLE_TEST_ENDPOINTS=true, so in any normal deployment this
+    route is indistinguishable from one that doesn't exist. Never enabled in
+    docker-compose.yml's committed defaults — set via a test-only compose
+    override (see docker-compose.test.yml) or exported directly for a local
+    run. Exposes nothing but a connection count: no socket objects, no other
+    users' ids.
+    """
+    if os.getenv("ENABLE_TEST_ENDPOINTS") != "true":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+    return {"count": len(manager.active_connections.get(user_id, []))}

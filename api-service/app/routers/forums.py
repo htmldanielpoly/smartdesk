@@ -6,6 +6,7 @@ this catch-all route, which forwards the method, path, query string, JSON body
 and Authorization header verbatim and relays the forum-service's response.
 Auth itself is enforced by the forum-service (same JWT secret).
 """
+import contextlib
 import httpx
 import asyncio
 import websockets
@@ -81,22 +82,44 @@ async def websocket_proxy(websocket: WebSocket, token: str = Query(None)):
             await websocket.accept()
 
             async def to_backend():
-                try:
-                    while True:
-                        data = await websocket.receive_text()
-                        await backend_ws.send(data)
-                except WebSocketDisconnect:
-                    pass
+                while True:
+                    data = await websocket.receive_text()
+                    await backend_ws.send(data)
 
             async def to_frontend():
-                try:
-                    while True:
-                        data = await backend_ws.recv()
-                        await websocket.send_text(data)
-                except websockets.exceptions.ConnectionClosed:
-                    pass
+                while True:
+                    data = await backend_ws.recv()
+                    await websocket.send_text(data)
 
-            await asyncio.gather(to_backend(), to_frontend())
+            pump_to_backend = asyncio.create_task(to_backend())
+            pump_to_frontend = asyncio.create_task(to_frontend())
+            pumps = {pump_to_backend, pump_to_frontend}
+
+            # Whichever side disconnects (or errors) first ends the pair:
+            # cancel the other pump immediately instead of leaving it awaiting
+            # forever, then let this `async with` exit so backend_ws actually
+            # closes. Previously the sibling task just hung, keeping the
+            # outbound connection to forum-service (and its ConnectionManager
+            # entry) open forever.
+            done, pending = await asyncio.wait(pumps, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+            for task in pending:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+            for task in done:
+                exc = task.exception()
+                if exc is not None and not isinstance(
+                    exc, (WebSocketDisconnect, websockets.exceptions.ConnectionClosed)
+                ):
+                    raise exc
+
+        # backend_ws is closed by now (the `async with` above exited). Make
+        # sure the frontend socket isn't left open with nothing pumping into
+        # it if the backend side was what ended the pair.
+        with contextlib.suppress(RuntimeError):
+            await websocket.close()
 
     except websockets.exceptions.InvalidStatusCode as e:
         print(f"🔥 WEBSOCKET PROXY CRASH: Upstream rejected with status {e.status_code}")
