@@ -184,8 +184,8 @@ rule-based fallbacks unless you also `pip install -r requirements-llm.txt`
 ## Running tests
 
 ```bash
-cd api-service   && pip install -r requirements-dev.txt && pytest   # 39 tests
-cd ai-service    && pip install -r requirements-dev.txt && pytest   # 31 tests
+cd api-service   && pip install -r requirements-dev.txt && pytest   # 43 tests
+cd ai-service    && pip install -r requirements-dev.txt && pytest   # 34 tests
 cd forum-service && pip install -r requirements-dev.txt && pytest   # 14 tests
 ```
 

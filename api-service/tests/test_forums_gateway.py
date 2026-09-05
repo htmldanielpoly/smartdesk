@@ -12,9 +12,13 @@ from app.routers import forums
 
 
 class _FakeResponse:
-    def __init__(self, status_code: int, payload: dict):
+    def __init__(self, status_code: int, payload: dict, headers: dict | None = None):
         self.status_code = status_code
         self._payload = payload
+        # proxy() reads resp.headers.get("content-type", ...) to decide whether
+        # to relay JSON or stream raw bytes; default to JSON since every
+        # existing caller here passes a dict payload and expects r.json().
+        self.headers = headers if headers is not None else {"content-type": "application/json"}
 
     def json(self):
         return self._payload

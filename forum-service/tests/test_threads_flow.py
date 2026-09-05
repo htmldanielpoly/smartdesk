@@ -17,8 +17,9 @@ def test_create_thread_appears_in_board_listing(client):
     assert thread["post_count"] == 1
     assert thread["locked"] is False and thread["pinned"] is False
 
+    # technical already has one demo thread from seed_boards(), plus this one.
     listing = client.get("/boards/technical/threads", headers=headers).json()
-    assert listing["total"] == 1
+    assert listing["total"] == 2
     assert listing["items"][0]["id"] == thread["id"]
 
     # The thread's body became its first post.
@@ -29,7 +30,7 @@ def test_create_thread_appears_in_board_listing(client):
     # Board thread_count reflects the new thread.
     boards = client.get("/boards", headers=headers).json()
     technical = next(b for b in boards if b["slug"] == "technical")
-    assert technical["thread_count"] == 1
+    assert technical["thread_count"] == 2
 
 
 def test_reply_bumps_post_count_and_last_post_at(client):
@@ -50,21 +51,27 @@ def test_reply_bumps_post_count_and_last_post_at(client):
 
 def test_board_listing_pagination(client):
     headers = auth_header("user-1")
+    # Spread the 25 creates across 3 users so no single user's 10/60s
+    # create-thread rate limit gets hit — this test is about pagination, not
+    # rate limiting.
     for i in range(25):
-        r = _create_thread(client, headers, slug="general", title=f"Thread {i}")
+        creator_headers = auth_header(f"pager-{i % 3}")
+        r = _create_thread(client, creator_headers, slug="general", title=f"Thread {i}")
         assert r.status_code == 201
 
+    # general also has one demo thread from seed_boards(), so 25 created + 1
+    # seeded = 26.
     page1 = client.get("/boards/general/threads?page=1", headers=headers).json()
-    assert page1["total"] == 25
+    assert page1["total"] == 26
     assert page1["page_size"] == 20
     assert len(page1["items"]) == 20
     # Newest activity first.
     assert page1["items"][0]["title"] == "Thread 24"
 
     page2 = client.get("/boards/general/threads?page=2", headers=headers).json()
-    assert len(page2["items"]) == 5
+    assert len(page2["items"]) == 6
     ids = {t["id"] for t in page1["items"]} | {t["id"] for t in page2["items"]}
-    assert len(ids) == 25
+    assert len(ids) == 26
 
 
 def test_unknown_board_404(client):
@@ -111,5 +118,12 @@ def test_pinned_threads_listed_first(client):
     assert r.status_code == 200
     assert r.json()["pinned"] is True
 
+    # billing also has one demo thread from seed_boards() ("Double charged for
+    # last month"), unpinned with a fixed past lastPostAt — it always sorts
+    # after the pinned thread and after anything created just now in the test.
     listing = client.get("/boards/billing/threads", headers=headers).json()
-    assert [t["title"] for t in listing["items"]] == ["Old but pinned", "Newer thread"]
+    assert [t["title"] for t in listing["items"]] == [
+        "Old but pinned",
+        "Newer thread",
+        "Double charged for last month",
+    ]

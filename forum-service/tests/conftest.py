@@ -14,7 +14,16 @@ from starlette.testclient import TestClient
 from app import database
 from app.config import settings
 from app.main import app
+from app.rate_limit import reset as reset_rate_limit
 from app.seed import seed_boards
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limits():
+    """rate_limit._hits is module-global; without this, one test's request
+    count bleeds into the next test's assertions (see api-service/tests/
+    conftest.py, which resets it the same way in its client fixture)."""
+    reset_rate_limit()
 
 
 @pytest.fixture

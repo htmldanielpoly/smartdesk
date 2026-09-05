@@ -11,7 +11,8 @@ def test_boards_seeded_and_listed(client):
     boards = r.json()
     assert len(boards) == len(BOARDS) == 6
     assert {b["slug"] for b in boards} == EXPECTED_SLUGS
-    assert all(b["thread_count"] == 0 for b in boards)
+    # Each board starts with exactly one demo thread from seed_boards().
+    assert all(b["thread_count"] == 1 for b in boards)
 
     general = next(b for b in boards if b["slug"] == "general")
     assert general["name"] == "General Support"
