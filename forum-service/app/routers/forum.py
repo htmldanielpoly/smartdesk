@@ -267,6 +267,12 @@ async def delete_post(post_id: str, user: dict = Depends(get_current_user)):
 
 # --- NEW: Engagement Endpoints ---
 
+async def _like_counts(collection, doc_id):
+    """Read back the like/dislike counts after a like/dislike mutation."""
+    doc = await collection.find_one({"_id": doc_id}, {"likes": 1, "dislikes": 1})
+    return len(doc.get("likes", [])), len(doc.get("dislikes", []))
+
+
 @router.post("/threads/{thread_id}/like", status_code=status.HTTP_200_OK)
 async def like_thread(
         thread_id: str,
@@ -282,14 +288,18 @@ async def like_thread(
     # repeat likes from the same user are otherwise a no-op that shouldn't spam.
     owner_id = thread.get("authorId")
     if result.modified_count and owner_id and owner_id != user["id"]:
+        likes, dislikes = await _like_counts(get_db().threads, thread["_id"])
         await manager.send_personal_message({
             "type": "like_notification",
             "data": {
                 "kind": "thread",
                 "action": "like",
+                "id": thread_id,
                 "thread_id": thread_id,
                 "title": thread["title"],
                 "by_user": user["id"],
+                "likes": likes,
+                "dislikes": dislikes,
             }
         }, owner_id)
     return {"detail": "Thread liked successfully"}
@@ -308,14 +318,18 @@ async def dislike_thread(
     )
     owner_id = thread.get("authorId")
     if result.modified_count and owner_id and owner_id != user["id"]:
+        likes, dislikes = await _like_counts(get_db().threads, thread["_id"])
         await manager.send_personal_message({
             "type": "like_notification",
             "data": {
                 "kind": "thread",
                 "action": "dislike",
+                "id": thread_id,
                 "thread_id": thread_id,
                 "title": thread["title"],
                 "by_user": user["id"],
+                "likes": likes,
+                "dislikes": dislikes,
             }
         }, owner_id)
     return {"detail": "Thread disliked successfully"}
@@ -334,13 +348,17 @@ async def like_post(
     )
     owner_id = post.get("authorId")
     if result.modified_count and owner_id and owner_id != user["id"]:
+        likes, dislikes = await _like_counts(get_db().posts, post["_id"])
         await manager.send_personal_message({
             "type": "like_notification",
             "data": {
                 "kind": "post",
                 "action": "like",
+                "id": post_id,
                 "thread_id": str(post["threadId"]),
                 "by_user": user["id"],
+                "likes": likes,
+                "dislikes": dislikes,
             }
         }, owner_id)
     return {"detail": "Post liked successfully"}
@@ -359,13 +377,17 @@ async def dislike_post(
     )
     owner_id = post.get("authorId")
     if result.modified_count and owner_id and owner_id != user["id"]:
+        likes, dislikes = await _like_counts(get_db().posts, post["_id"])
         await manager.send_personal_message({
             "type": "like_notification",
             "data": {
                 "kind": "post",
                 "action": "dislike",
+                "id": post_id,
                 "thread_id": str(post["threadId"]),
                 "by_user": user["id"],
+                "likes": likes,
+                "dislikes": dislikes,
             }
         }, owner_id)
     return {"detail": "Post disliked successfully"}

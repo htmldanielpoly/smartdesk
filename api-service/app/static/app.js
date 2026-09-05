@@ -937,6 +937,7 @@ async function viewThread(v, id) {
   v.appendChild(head);
 
   // 2. POST LOOP & POST ENGAGEMENT METRICS
+  const postEngageUpdaters = new Map();
   function renderPost(p) {
     const me = p.author_id === state.userId;
     const canDel = !p.deleted && (me || isStaff());
@@ -979,6 +980,11 @@ async function viewThread(v, id) {
         post.querySelector(`#dislike-count-${p.id}`).textContent = dislikeCount;
       };
       renderPostEngage();
+      postEngageUpdaters.set(String(p.id), (likes, dislikes) => {
+        likeCount = likes;
+        dislikeCount = dislikes;
+        renderPostEngage();
+      });
 
       post.querySelector(`#like-${p.id}`).onclick = async () => {
         const snapshot = { hasLiked, hasDisliked, likeCount, dislikeCount };
@@ -1051,6 +1057,16 @@ async function viewThread(v, id) {
   window.threadLiveAdd = (p) => {
     if (document.getElementById(`post-${p.id}`)) return; // already rendered locally (e.g. by the poster)
     stack.appendChild(renderPost(p));
+  };
+  window.threadLiveLikeUpdate = (n) => {
+    if (n.kind === "thread" && String(n.id) === String(id)) {
+      thLikeCount = n.likes;
+      thDislikeCount = n.dislikes;
+      renderThreadEngage();
+    } else if (n.kind === "post") {
+      const updater = postEngageUpdaters.get(String(n.id));
+      if (updater) updater(n.likes, n.dislikes);
+    }
   };
   window.threadLiveMarkDeleted = (p) => {
     const bodyEl = document.getElementById(`post-body-${p.id}`);
@@ -1412,6 +1428,12 @@ function connectWebSocket() {
           const kind = n.kind === "thread" ? "your thread" : "your reply";
           const label = n.title ? `"${n.title.slice(0, 40)}"` : kind;
           toast(`${action} ${nameForUserId(n.by_user)} ${n.action}d ${label}`);
+          if (currentView === "thread" && String(window.currentThreadId) === String(n.thread_id) && window.threadLiveLikeUpdate) {
+            window.threadLiveLikeUpdate(n);
+          }
+          if (currentView === "profile" && window.profileLiveLikeUpdate) {
+            window.profileLiveLikeUpdate(n);
+          }
         } else if (msg.type === "new_post") {
           if (currentView === "thread" && String(window.currentThreadId) === String(msg.data.thread_id) && window.threadLiveAdd) {
             window.threadLiveAdd(msg.data.post);
@@ -1459,6 +1481,41 @@ function connectWebSocket() {
 /* ---------- My Profile ---------- */
 async function viewProfile(v) {
   v.innerHTML = '<div class="spinner"></div>';
+
+  // Registered before the /me/summary fetch below resolves, so a
+  // like_notification that arrives while it's still in flight isn't
+  // silently dropped — it's queued here and replayed once itemCounts is
+  // populated, instead of requiring window.profileLiveLikeUpdate to already
+  // exist.
+  let totalLikes = 0;
+  let totalDislikes = 0;
+  const itemCounts = new Map();
+  const pendingLikeUpdates = [];
+  let itemCountsReady = false;
+
+  function applyLikeUpdate(n) {
+    const key = String(n.id);
+    const prev = itemCounts.get(key);
+    if (!prev) return; // not one of this user's own listed items
+    const likeEl = document.getElementById(`profile-likes-${key}`);
+    const dislikeEl = document.getElementById(`profile-dislikes-${key}`);
+    if (likeEl) likeEl.textContent = n.likes;
+    if (dislikeEl) dislikeEl.textContent = n.dislikes;
+    totalLikes += n.likes - prev.likes;
+    totalDislikes += n.dislikes - prev.dislikes;
+    prev.likes = n.likes;
+    prev.dislikes = n.dislikes;
+    const totalLikesEl = document.getElementById("profile-total-likes");
+    const totalDislikesEl = document.getElementById("profile-total-dislikes");
+    if (totalLikesEl) totalLikesEl.textContent = `👍 ${totalLikes}`;
+    if (totalDislikesEl) totalDislikesEl.textContent = `👎 ${totalDislikes}`;
+  }
+
+  window.profileLiveLikeUpdate = (n) => {
+    if (!itemCountsReady) { pendingLikeUpdates.push(n); return; }
+    applyLikeUpdate(n);
+  };
+
   let data;
   try { data = await api("GET", "/api/forums/me/summary"); }
   catch (e) { return renderError(v, e); }
@@ -1466,12 +1523,15 @@ async function viewProfile(v) {
   v.innerHTML = "";
   v.appendChild(el(`<div class="page-head"><h2>My Profile</h2></div>`));
 
+  totalLikes = data.total_likes;
+  totalDislikes = data.total_dislikes;
+
   // Stats row
   const stats = el('<div class="stats"></div>');
   stats.appendChild(el(`<div class="stat"><div class="n">${data.threads.length}</div><div class="l">Posts</div></div>`));
   stats.appendChild(el(`<div class="stat"><div class="n">${data.posts.length}</div><div class="l">Replies</div></div>`));
-  stats.appendChild(el(`<div class="stat"><div class="n" style="color:var(--success)">👍 ${data.total_likes}</div><div class="l">Total likes</div></div>`));
-  stats.appendChild(el(`<div class="stat"><div class="n" style="color:var(--danger)">👎 ${data.total_dislikes}</div><div class="l">Total dislikes</div></div>`));
+  stats.appendChild(el(`<div class="stat"><div class="n" id="profile-total-likes" style="color:var(--success)">👍 ${totalLikes}</div><div class="l">Total likes</div></div>`));
+  stats.appendChild(el(`<div class="stat"><div class="n" id="profile-total-dislikes" style="color:var(--danger)">👎 ${totalDislikes}</div><div class="l">Total dislikes</div></div>`));
   v.appendChild(stats);
 
   // My threads
@@ -1482,11 +1542,12 @@ async function viewProfile(v) {
       const row = el(`<div class="item">
         <div class="grow">
           <div class="title">${esc(t.title)}</div>
-          <div class="sub">${t.board_slug} · ${t.post_count} post${t.post_count === 1 ? "" : "s"} · 👍 ${t.likes.length} 👎 ${t.dislikes.length}</div>
+          <div class="sub">${t.board_slug} · ${t.post_count} post${t.post_count === 1 ? "" : "s"} · 👍 <span id="profile-likes-${t.id}">${t.likes.length}</span> 👎 <span id="profile-dislikes-${t.id}">${t.dislikes.length}</span></div>
         </div>→
       </div>`);
       row.onclick = () => navigate("thread", t.id);
       list.appendChild(row);
+      itemCounts.set(String(t.id), { likes: t.likes.length, dislikes: t.dislikes.length });
     }
     v.appendChild(list);
   }
@@ -1499,11 +1560,12 @@ async function viewProfile(v) {
       const row = el(`<div class="item">
         <div class="grow">
           <div class="title" style="font-size:13px">${esc(p.body.slice(0, 120))}${p.body.length > 120 ? "…" : ""}</div>
-          <div class="sub">in thread · ${timeAgo(p.created_at)} · 👍 ${p.likes.length} 👎 ${p.dislikes.length}</div>
+          <div class="sub">in thread · ${timeAgo(p.created_at)} · 👍 <span id="profile-likes-${p.id}">${p.likes.length}</span> 👎 <span id="profile-dislikes-${p.id}">${p.dislikes.length}</span></div>
         </div>→
       </div>`);
       row.onclick = () => navigate("thread", p.thread_id);
       list.appendChild(row);
+      itemCounts.set(String(p.id), { likes: p.likes.length, dislikes: p.dislikes.length });
     }
     v.appendChild(list);
   }
@@ -1511,6 +1573,9 @@ async function viewProfile(v) {
   if (!data.threads.length && !data.posts.length) {
     v.appendChild(el('<div class="empty"><div class="big">🧑</div>You haven\'t posted anything yet.</div>'));
   }
+
+  itemCountsReady = true;
+  pendingLikeUpdates.splice(0).forEach(applyLikeUpdate);
 }
 
 
