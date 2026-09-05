@@ -124,9 +124,14 @@ async def websocket_proxy(websocket: WebSocket, token: str = Query(None)):
     except websockets.exceptions.InvalidStatusCode as e:
         print(f"🔥 WEBSOCKET PROXY CRASH: Upstream rejected with status {e.status_code}")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+    except (WebSocketDisconnect, websockets.exceptions.ConnectionClosed):
+        # A normal disconnect that happened before the pump loop above even
+        # started (e.g. the frontend vanished during/just after accept()) —
+        # not a crash, nothing to alarm about.
+        print("WebSocket proxy connection closed.")
+        with contextlib.suppress(RuntimeError):
+            await websocket.close()
     except Exception as e:
         print(f"🔥 WEBSOCKET PROXY CRASH: {repr(e)}")
-        try:
+        with contextlib.suppress(RuntimeError):
             await websocket.close()
-        except RuntimeError:
-            pass

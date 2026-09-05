@@ -49,6 +49,37 @@ def test_reply_bumps_post_count_and_last_post_at(client):
     assert detail["thread"]["last_post_at"] >= detail["thread"]["created_at"]
 
 
+def test_reply_broadcasts_thread_update_for_board_listings(client, monkeypatch):
+    """A reply must also tell any open board-list view to refresh this
+    thread's row (post count, last activity), not just the thread detail view."""
+    from app.routers import forum as forum_router
+
+    broadcasts = []
+
+    async def _capture_broadcast(message):
+        broadcasts.append(message)
+
+    monkeypatch.setattr(forum_router.manager, "broadcast", _capture_broadcast)
+
+    headers = auth_header("user-1")
+    thread = _create_thread(client, headers).json()
+    broadcasts.clear()  # only care about what create_post itself broadcasts
+
+    r = client.post(
+        f"/threads/{thread['id']}/posts", json={"body": "Same here."}, headers=auth_header("user-2")
+    )
+    assert r.status_code == 201
+
+    types = [b["type"] for b in broadcasts]
+    assert types == ["new_post", "thread_updated"]
+
+    update = next(b for b in broadcasts if b["type"] == "thread_updated")["data"]
+    assert update["id"] == thread["id"]
+    assert update["board_slug"] == "technical"
+    assert update["post_count"] == 2
+    assert "last_post_at" in update
+
+
 def test_board_listing_pagination(client):
     headers = auth_header("user-1")
     # Spread the 25 creates across 3 users so no single user's 10/60s

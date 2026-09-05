@@ -25,7 +25,7 @@ from app.schemas import (
     DirectMessageOut
 )
 from app.websockets import manager
-from app.serializers import serialize_board, serialize_post, serialize_thread
+from app.serializers import serialize_board, serialize_dm, serialize_post, serialize_thread
 
 router = APIRouter(tags=["forum"])
 
@@ -208,6 +208,12 @@ async def create_post(
             "post": serialized,
         }
     })
+    # Also let any open board-list view update this thread's row in place
+    # (post count, last activity) — same shape as thread_moderated's payload.
+    await manager.broadcast({
+        "type": "thread_updated",
+        "data": serialize_thread(await _get_thread_or_404(thread_id)),
+    })
     return serialized
 
 
@@ -367,17 +373,6 @@ async def dislike_post(
 
 # --- NEW: Direct Messaging Endpoints ---
 
-def _serialize_dm(doc: dict) -> dict:
-    """Helper to convert MongoDB _id to string id for Pydantic."""
-    doc["id"] = str(doc.pop("_id"))
-
-    # Convert datetime to an ISO 8601 string so json.dumps can serialize it
-    if "created_at" in doc and hasattr(doc["created_at"], "isoformat"):
-        doc["created_at"] = doc["created_at"].isoformat()
-
-    return doc
-
-
 @router.post("/messages", response_model=DirectMessageOut, status_code=status.HTTP_201_CREATED)
 async def create_direct_message(
         payload: DirectMessageCreate,
@@ -399,7 +394,7 @@ async def create_direct_message(
     result = await get_db().direct_messages.insert_one(doc)
     doc["_id"] = result.inserted_id
 
-    serialized_dm = _serialize_dm(doc)
+    serialized_dm = serialize_dm(doc)
 
     # NEW: Send real-time notification to the recipient
     notification_payload = {
@@ -424,7 +419,7 @@ async def get_direct_messages(
         ]
     }
     cursor = get_db().direct_messages.find(query).sort("created_at", 1).limit(limit)
-    return [_serialize_dm(doc) async for doc in cursor]
+    return [serialize_dm(doc) async for doc in cursor]
 
 
 

@@ -1377,6 +1377,12 @@ function connectWebSocket() {
           if (currentView === "board" && String(window.currentBoardSlug) === String(msg.data.board_slug) && window.boardLiveUpdateThread) {
             window.boardLiveUpdateThread(msg.data);
           }
+        } else if (msg.type === "thread_updated") {
+          // A reply landed on this thread — refresh its board-list row
+          // (post count, last activity) if that board is currently open.
+          if (currentView === "board" && String(window.currentBoardSlug) === String(msg.data.board_slug) && window.boardLiveUpdateThread) {
+            window.boardLiveUpdateThread(msg.data);
+          }
         } else if (msg.type === "new_thread") {
           if (currentView === "board" && String(window.currentBoardSlug) === String(msg.data.board_slug) && window.boardLiveAddThread) {
             window.boardLiveAddThread(msg.data);

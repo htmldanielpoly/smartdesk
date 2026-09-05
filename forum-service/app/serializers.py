@@ -45,3 +45,20 @@ def serialize_post(doc: dict) -> dict:
         "likes": doc.get("likes", []),
         "dislikes": doc.get("dislikes", []),
     }
+
+def serialize_dm(doc: dict) -> dict:
+    # DM docs already use snake_case field names at the Mongo layer, unlike
+    # thread/post docs (camelCase) — so no key renaming needed here, just
+    # _id -> id and a JSON-friendly created_at.
+    created_at = doc["created_at"]
+    if hasattr(created_at, "isoformat"):
+        created_at = created_at.isoformat()
+    return {
+        "id": str(doc["_id"]),
+        "sender_id": doc["sender_id"],
+        "recipient_id": doc["recipient_id"],
+        "content": doc["content"],
+        "media_urls": doc.get("media_urls", []),
+        "created_at": created_at,
+        "is_read": doc.get("is_read", False),
+    }
