@@ -688,27 +688,47 @@ async function viewBoard(v, slug) {
   v.innerHTML = "";
   v.appendChild(backBtn("Back to forums", "forums"));
   const head = el(`<div class="page-head"><h2>${esc(slug)} board</h2></div>`);
-  const nb = el('<button class="btn">+ New thread</button>');
+  const nb = el('<button class="btn">+ New post</button>');
   nb.onclick = () => openThreadComposer(v, slug);
   head.appendChild(nb);
   v.appendChild(head);
 
-  if (!page.items.length) { v.appendChild(el('<div class="empty"><div class="big">💬</div>No threads yet. Start the conversation!</div>')); return; }
-  const list = el('<div class="list"></div>');
-  for (const th of page.items) {
-    const row = el(`<div class="item">
-      <div class="grow"><div class="title">${th.pinned ? "📌 " : ""}${th.locked ? "🔒 " : ""}${esc(th.title)}</div>
-      <div class="sub">${th.post_count} post${th.post_count === 1 ? "" : "s"} · last activity ${timeAgo(th.last_post_at)}</div></div>→
+  function renderBoardRow(th) {
+    const row = el(`<div class="item" id="board-row-${th.id}">
+      <div class="grow"><div class="title" id="board-row-title-${th.id}">${th.pinned ? "📌 " : ""}${th.locked ? "🔒 " : ""}${esc(th.title)}</div>
+      <div class="sub" id="board-row-sub-${th.id}">${th.post_count} post${th.post_count === 1 ? "" : "s"} · last activity ${timeAgo(th.last_post_at)}</div></div>→
     </div>`);
     row.onclick = () => navigate("thread", th.id);
-    list.appendChild(row);
+    return row;
+  }
+
+  const list = el('<div class="list"></div>');
+  if (page.items.length) {
+    for (const th of page.items) {
+      list.appendChild(renderBoardRow(th));
+    }
   }
   v.appendChild(list);
+  if (!page.items.length) { v.appendChild(el('<div class="empty"><div class="big">💬</div>No threads yet. Start the conversation!</div>')); }
+
+  window.currentBoardSlug = slug;
+  window.boardLiveAddThread = (th) => {
+    const empty = v.querySelector(".empty");
+    if (empty) empty.remove();
+    if (document.getElementById(`board-row-${th.id}`)) return;
+    list.prepend(renderBoardRow(th));
+  };
+  window.boardLiveUpdateThread = (th) => {
+    const titleEl = document.getElementById(`board-row-title-${th.id}`);
+    if (titleEl) titleEl.innerHTML = `${th.pinned ? "📌 " : ""}${th.locked ? "🔒 " : ""}${esc(th.title)}`;
+    const subEl = document.getElementById(`board-row-sub-${th.id}`);
+    if (subEl) subEl.textContent = `${th.post_count} post${th.post_count === 1 ? "" : "s"} · last activity ${timeAgo(th.last_post_at)}`;
+  };
 }
 
 function openThreadComposer(v, slug) {
   const modal = el(`<div class="card card-pad" style="max-width:600px;margin-bottom:16px">
-    <h3 style="margin-top:0">New thread</h3>
+    <h3 style="margin-top:0">New post</h3>
     <label class="field"><span>Title</span><input id="th-title" maxlength="160" /></label>
     <label class="field"><span>Message</span><textarea id="th-body" maxlength="5000"></textarea></label>
     <label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:13px">
@@ -724,7 +744,7 @@ function openThreadComposer(v, slug) {
     </label>
     <div id="th-media-preview"></div>
     <div class="err-text" id="th-err"></div>
-    <button class="btn" id="th-post">Post thread</button>
+    <button class="btn" id="th-post">Post</button>
   </div>`);
   v.querySelector(".page-head").after(modal);
 
@@ -770,7 +790,7 @@ function openThreadComposer(v, slug) {
     if (!title || !body) { modal.querySelector("#th-err").textContent = "Title and message required."; return; }
     try {
       const th = await api("POST", `/api/forums/boards/${slug}/threads`, { title, body, is_anonymous, media_urls: thMedia.map(m => m.url) });
-      toast("Thread posted");
+      toast("Post created");
       navigate("thread", th.id);
     }
     catch (e) { modal.querySelector("#th-err").textContent = e.detail; }
@@ -861,7 +881,7 @@ async function viewThread(v, id) {
         thPinned = nextPinned;
         head.querySelector("#thread-title").innerHTML = `${thPinned ? "📌 " : ""}${th.locked ? "🔒 " : ""}${esc(th.title)}`;
         pin.textContent = thPinned ? "Unpin" : "Pin";
-        toast(thPinned ? "Thread pinned" : "Thread unpinned");
+        toast(thPinned ? "Post pinned" : "Post unpinned");
       } catch (e) { toast(e.detail, true); }
     };
     mod.append(lock, pin);
@@ -883,7 +903,7 @@ async function viewThread(v, id) {
     let likeCount = (p.likes || []).length;
     let dislikeCount = (p.dislikes || []).length;
 
-    const post = el(`<div class="card card-pad">
+    const post = el(`<div class="card card-pad" id="post-${p.id}">
       <div class="comment-head" style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-bottom:8px">
         <span>${authorName} ${roleBadge ? ` · ${roleBadge}` : ""}</span>
         <span>${timeAgo(p.created_at)}</span>
@@ -945,7 +965,7 @@ async function viewThread(v, id) {
     }
 
     if (canDel) {
-      const d = el('<button class="btn danger sm" style="margin-top:10px">Delete</button>');
+      const d = el(`<button class="btn danger sm" id="del-btn-${p.id}" style="margin-top:10px">Delete</button>`);
       d.onclick = async () => {
         try {
           await api("DELETE", `/api/forums/posts/${p.id}`);
@@ -970,6 +990,30 @@ async function viewThread(v, id) {
     stack.appendChild(renderPost(p));
   }
   v.appendChild(stack);
+
+  window.currentThreadId = id;
+  window.threadLiveModerate = (t) => {
+    thPinned = t.pinned;
+    head.querySelector("#thread-title").innerHTML = `${thPinned ? "📌 " : ""}${t.locked ? "🔒 " : ""}${esc(t.title)}`;
+    const pinBtn = head.querySelector(".row .btn.ghost.sm:nth-child(2)");
+    if (pinBtn) pinBtn.textContent = thPinned ? "Unpin" : "Pin";
+    const lockBtn = head.querySelector(".row .btn.ghost.sm:nth-child(1)");
+    if (lockBtn) lockBtn.textContent = t.locked ? "Unlock" : "Lock";
+  };
+  window.threadLiveAdd = (p) => {
+    if (document.getElementById(`post-${p.id}`)) return; // already rendered locally (e.g. by the poster)
+    stack.appendChild(renderPost(p));
+  };
+  window.threadLiveMarkDeleted = (p) => {
+    const bodyEl = document.getElementById(`post-body-${p.id}`);
+    if (bodyEl) bodyEl.innerHTML = '<em class="muted">[deleted]</em>';
+    const mediaEl = document.getElementById(`post-media-${p.id}`);
+    if (mediaEl) mediaEl.remove();
+    const engageEl = document.getElementById(`engage-${p.id}`);
+    if (engageEl) engageEl.remove();
+    const delBtn = document.getElementById(`del-btn-${p.id}`);
+    if (delBtn) delBtn.remove();
+  };
 
   // 3. REPLY COMPOSER
     if (!th.locked) {
@@ -1308,6 +1352,25 @@ function connectWebSocket() {
           const kind = n.kind === "thread" ? "your thread" : "your reply";
           const label = n.title ? `"${n.title.slice(0, 40)}"` : kind;
           toast(`${action} ${nameForUserId(n.by_user)} ${n.action}d ${label}`);
+        } else if (msg.type === "new_post") {
+          if (currentView === "thread" && String(window.currentThreadId) === String(msg.data.thread_id) && window.threadLiveAdd) {
+            window.threadLiveAdd(msg.data.post);
+          }
+        } else if (msg.type === "post_deleted") {
+          if (currentView === "thread" && String(window.currentThreadId) === String(msg.data.thread_id) && window.threadLiveMarkDeleted) {
+            window.threadLiveMarkDeleted(msg.data.post);
+          }
+        } else if (msg.type === "thread_moderated") {
+          if (currentView === "thread" && String(window.currentThreadId) === String(msg.data.id) && window.threadLiveModerate) {
+            window.threadLiveModerate(msg.data);
+          }
+          if (currentView === "board" && String(window.currentBoardSlug) === String(msg.data.board_slug) && window.boardLiveUpdateThread) {
+            window.boardLiveUpdateThread(msg.data);
+          }
+        } else if (msg.type === "new_thread") {
+          if (currentView === "board" && String(window.currentBoardSlug) === String(msg.data.board_slug) && window.boardLiveAddThread) {
+            window.boardLiveAddThread(msg.data);
+          }
         }
     } catch (err) {
         console.error("[WS] Failed to parse message:", err);
@@ -1336,7 +1399,7 @@ async function viewProfile(v) {
 
   // Stats row
   const stats = el('<div class="stats"></div>');
-  stats.appendChild(el(`<div class="stat"><div class="n">${data.threads.length}</div><div class="l">Threads</div></div>`));
+  stats.appendChild(el(`<div class="stat"><div class="n">${data.threads.length}</div><div class="l">Posts</div></div>`));
   stats.appendChild(el(`<div class="stat"><div class="n">${data.posts.length}</div><div class="l">Replies</div></div>`));
   stats.appendChild(el(`<div class="stat"><div class="n" style="color:var(--success)">👍 ${data.total_likes}</div><div class="l">Total likes</div></div>`));
   stats.appendChild(el(`<div class="stat"><div class="n" style="color:var(--danger)">👎 ${data.total_dislikes}</div><div class="l">Total dislikes</div></div>`));
@@ -1344,7 +1407,7 @@ async function viewProfile(v) {
 
   // My threads
   if (data.threads.length) {
-    v.appendChild(el(`<div class="page-head" style="margin-top:24px"><h3>My Threads</h3></div>`));
+    v.appendChild(el(`<div class="page-head" style="margin-top:24px"><h3>My Posts</h3></div>`));
     const list = el('<div class="list"></div>');
     for (const t of data.threads) {
       const row = el(`<div class="item">

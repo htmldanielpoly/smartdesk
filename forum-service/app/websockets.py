@@ -22,6 +22,7 @@ class ConnectionManager:
             if not self.active_connections[user_id]:
                 del self.active_connections[user_id]
 
+
     async def send_personal_message(self, message: dict, user_id: str):
         """Sends a JSON message to all active connections for a specific user.
 
@@ -29,7 +30,7 @@ class ConnectionManager:
         for multi-worker deployments where sockets are held per-worker.
         """
         if user_id in self.active_connections:
-            payload = json.dumps(message)
+            payload = json.dumps(message, default=str)
             dead: list[WebSocket] = []
             for connection in self.active_connections[user_id]:
                 try:
@@ -38,6 +39,24 @@ class ConnectionManager:
                     dead.append(connection)
             for connection in dead:
                 self.disconnect(connection, user_id)
+
+    async def broadcast(self, message: dict):
+        """Sends a JSON message to every currently connected client, across all users.
+
+        NOTE: Single-process only, same caveat as send_personal_message.
+        """
+        payload = json.dumps(message, default=str)
+        for user_id, connections in list(self.active_connections.items()):
+            dead: list[WebSocket] = []
+            for connection in connections:
+                try:
+                    await connection.send_text(payload)
+                except Exception:
+                    dead.append(connection)
+            for connection in dead:
+                self.disconnect(connection, user_id)
+
+
 
 # Instantiate a singleton manager to be imported across the app
 manager = ConnectionManager()

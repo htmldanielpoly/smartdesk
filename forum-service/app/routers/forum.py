@@ -146,7 +146,12 @@ async def create_thread(
             "dislikes": []
         }
     )
-    return serialize_thread(thread_doc)
+    serialized = serialize_thread(thread_doc)
+    await manager.broadcast({
+        "type": "new_thread",
+        "data": serialized,
+    })
+    return serialized
 
 
 @router.get("/threads/{thread_id}", response_model=ThreadDetail)
@@ -195,7 +200,15 @@ async def create_post(
         {"_id": thread["_id"]},
         {"$set": {"lastPostAt": now}, "$inc": {"postCount": 1}},
     )
-    return serialize_post(doc)
+    serialized = serialize_post(doc)
+    await manager.broadcast({
+        "type": "new_post",
+        "data": {
+            "thread_id": thread_id,
+            "post": serialized,
+        }
+    })
+    return serialized
 
 
 @router.patch("/threads/{thread_id}", response_model=ThreadOut)
@@ -215,7 +228,12 @@ async def moderate_thread(
     if updates:
         await get_db().threads.update_one({"_id": thread["_id"]}, {"$set": updates})
 
-    return serialize_thread(await _get_thread_or_404(thread_id))
+    serialized = serialize_thread(await _get_thread_or_404(thread_id))
+    await manager.broadcast({
+        "type": "thread_moderated",
+        "data": serialized,
+    })
+    return serialized
 
 
 @router.delete("/posts/{post_id}", response_model=PostOut)
@@ -230,7 +248,15 @@ async def delete_post(post_id: str, user: dict = Depends(get_current_user)):
 
     await get_db().posts.update_one({"_id": post["_id"]}, {"$set": {"deleted": True}})
     post["deleted"] = True
-    return serialize_post(post)
+    serialized = serialize_post(post)
+    await manager.broadcast({
+        "type": "post_deleted",
+        "data": {
+            "thread_id": str(post["threadId"]),
+            "post": serialized,
+        }
+    })
+    return serialized
 
 
 # --- NEW: Engagement Endpoints ---
