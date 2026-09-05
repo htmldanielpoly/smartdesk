@@ -786,35 +786,65 @@ async function viewThread(v, id) {
   v.appendChild(backBtn("Back to board", "board", th.board_slug));
 
   // 1. THREAD HEADER & THREAD ENGAGEMENT METRICS
+  let thPinned = th.pinned;
+
   const head = el(`<div class="page-head" style="flex-direction:column; align-items:start;">
-    <h2>${th.pinned ? "📌 " : ""}${th.locked ? "🔒 " : ""}${esc(th.title)}</h2>
+    <h2 id="thread-title">${thPinned ? "📌 " : ""}${th.locked ? "🔒 " : ""}${esc(th.title)}</h2>
   </div>`);
 
-  const thLikes = th.likes || [];
-  const thDislikes = th.dislikes || [];
-  const thHasLiked = thLikes.includes(state.userId);
-  const thHasDisliked = thDislikes.includes(state.userId);
+  let thHasLiked = (th.likes || []).includes(state.userId);
+  let thHasDisliked = (th.dislikes || []).includes(state.userId);
+  let thLikeCount = (th.likes || []).length;
+  let thDislikeCount = (th.dislikes || []).length;
 
   const engageBar = el(`
     <div class="engagement-bar" style="border:none; margin-top:0; padding-top:4px; gap:8px;">
-      <button class="btn-engage ${thHasLiked ? 'active' : ''}" id="th-like">
+      <button class="btn-engage" id="th-like">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg> 
-        ${thLikes.length}
+        <span id="th-like-count">${thLikeCount}</span>
       </button>
-      <button class="btn-engage ${thHasDisliked ? 'active' : ''}" id="th-dislike">
+      <button class="btn-engage" id="th-dislike">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-2"></path></svg> 
-        ${thDislikes.length}
+        <span id="th-dislike-count">${thDislikeCount}</span>
       </button>
     </div>
   `);
 
+  const renderThreadEngage = () => {
+    engageBar.querySelector("#th-like").classList.toggle("active", thHasLiked);
+    engageBar.querySelector("#th-dislike").classList.toggle("active", thHasDisliked);
+    engageBar.querySelector("#th-like-count").textContent = thLikeCount;
+    engageBar.querySelector("#th-dislike-count").textContent = thDislikeCount;
+  };
+  renderThreadEngage();
+
   engageBar.querySelector("#th-like").onclick = async () => {
-    try { await api("POST", `/api/forums/threads/${id}/like`); navigate("thread", id); }
-    catch(e) { toast(e.detail, true); }
+    const snapshot = { thHasLiked, thHasDisliked, thLikeCount, thDislikeCount };
+    if (!thHasLiked) thLikeCount++;
+    if (thHasDisliked) thDislikeCount--;
+    thHasLiked = true;
+    thHasDisliked = false;
+    renderThreadEngage();
+    try { await api("POST", `/api/forums/threads/${id}/like`); }
+    catch (e) {
+      ({ thHasLiked, thHasDisliked, thLikeCount, thDislikeCount } = snapshot);
+      renderThreadEngage();
+      toast(e.detail, true);
+    }
   };
   engageBar.querySelector("#th-dislike").onclick = async () => {
-    try { await api("POST", `/api/forums/threads/${id}/dislike`); navigate("thread", id); }
-    catch(e) { toast(e.detail, true); }
+    const snapshot = { thHasLiked, thHasDisliked, thLikeCount, thDislikeCount };
+    if (!thHasDisliked) thDislikeCount++;
+    if (thHasLiked) thLikeCount--;
+    thHasDisliked = true;
+    thHasLiked = false;
+    renderThreadEngage();
+    try { await api("POST", `/api/forums/threads/${id}/dislike`); }
+    catch (e) {
+      ({ thHasLiked, thHasDisliked, thLikeCount, thDislikeCount } = snapshot);
+      renderThreadEngage();
+      toast(e.detail, true);
+    }
   };
   head.appendChild(engageBar);
 
@@ -823,16 +853,24 @@ async function viewThread(v, id) {
     const mod = el('<div class="row" style="flex:0 0 auto;gap:8px;margin-top:10px;"></div>');
     const lock = el(`<button class="btn ghost sm">${th.locked ? "Unlock" : "Lock"}</button>`);
     lock.onclick = () => moderate(id, { locked: !th.locked });
-    const pin = el(`<button class="btn ghost sm">${th.pinned ? "Unpin" : "Pin"}</button>`);
-    pin.onclick = () => moderate(id, { pinned: !th.pinned });
+    const pin = el(`<button class="btn ghost sm">${thPinned ? "Unpin" : "Pin"}</button>`);
+    pin.onclick = async () => {
+      const nextPinned = !thPinned;
+      try {
+        await api("PATCH", `/api/forums/threads/${id}`, { pinned: nextPinned });
+        thPinned = nextPinned;
+        head.querySelector("#thread-title").innerHTML = `${thPinned ? "📌 " : ""}${th.locked ? "🔒 " : ""}${esc(th.title)}`;
+        pin.textContent = thPinned ? "Unpin" : "Pin";
+        toast(thPinned ? "Thread pinned" : "Thread unpinned");
+      } catch (e) { toast(e.detail, true); }
+    };
     mod.append(lock, pin);
     head.appendChild(mod);
   }
   v.appendChild(head);
 
   // 2. POST LOOP & POST ENGAGEMENT METRICS
-  const stack = el('<div class="stack"></div>');
-  for (const p of detail.posts) {
+  function renderPost(p) {
     const me = p.author_id === state.userId;
     const canDel = !p.deleted && (me || isStaff());
 
@@ -840,50 +878,96 @@ async function viewThread(v, id) {
     const authorName = p.is_anonymous ? "Anonymous" : (me ? "You" : (p.author_id ? p.author_id.slice(-6) : "Unknown"));
     const roleBadge = p.author_role ? `<span class="badge soft">${p.author_role}</span>` : "";
 
-    const likes = p.likes || [];
-    const dislikes = p.dislikes || [];
-    const hasLiked = likes.includes(state.userId);
-    const hasDisliked = dislikes.includes(state.userId);
+    let hasLiked = (p.likes || []).includes(state.userId);
+    let hasDisliked = (p.dislikes || []).includes(state.userId);
+    let likeCount = (p.likes || []).length;
+    let dislikeCount = (p.dislikes || []).length;
 
     const post = el(`<div class="card card-pad">
       <div class="comment-head" style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-bottom:8px">
         <span>${authorName} ${roleBadge ? ` · ${roleBadge}` : ""}</span>
         <span>${timeAgo(p.created_at)}</span>
       </div>
-      <div style="white-space:pre-wrap">${p.deleted ? '<em class="muted">[deleted]</em>' : esc(p.body)}</div>
-      ${!p.deleted && p.media_urls && p.media_urls.length ? mediaPreviewHtml(p.media_urls.map(u => `/api/forums${u}`)) : ""}
+      <div id="post-body-${p.id}" style="white-space:pre-wrap">${p.deleted ? '<em class="muted">[deleted]</em>' : esc(p.body)}</div>
+      ${!p.deleted && p.media_urls && p.media_urls.length ? `<div id="post-media-${p.id}">${mediaPreviewHtml(p.media_urls.map(u => `/api/forums${u}`))}</div>` : ""}
       
       ${!p.deleted ? `
-      <div class="engagement-bar">
-        <button class="btn-engage ${hasLiked ? 'active' : ''}" id="like-${p.id}">
+      <div class="engagement-bar" id="engage-${p.id}">
+        <button class="btn-engage" id="like-${p.id}">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg> 
-          ${likes.length}
+          <span id="like-count-${p.id}">${likeCount}</span>
         </button>
-        <button class="btn-engage ${hasDisliked ? 'active' : ''}" id="dislike-${p.id}">
+        <button class="btn-engage" id="dislike-${p.id}">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-2"></path></svg> 
-          ${dislikes.length}
+          <span id="dislike-count-${p.id}">${dislikeCount}</span>
         </button>
       </div>` : ''}
     </div>`);
 
     if (!p.deleted) {
+      const renderPostEngage = () => {
+        post.querySelector(`#like-${p.id}`).classList.toggle("active", hasLiked);
+        post.querySelector(`#dislike-${p.id}`).classList.toggle("active", hasDisliked);
+        post.querySelector(`#like-count-${p.id}`).textContent = likeCount;
+        post.querySelector(`#dislike-count-${p.id}`).textContent = dislikeCount;
+      };
+      renderPostEngage();
+
       post.querySelector(`#like-${p.id}`).onclick = async () => {
-        try { await api("POST", `/api/forums/posts/${p.id}/like`); navigate("thread", id); }
-        catch (e) { toast(e.detail, true); }
+        const snapshot = { hasLiked, hasDisliked, likeCount, dislikeCount };
+        if (!hasLiked) likeCount++;
+        if (hasDisliked) dislikeCount--;
+        hasLiked = true;
+        hasDisliked = false;
+        renderPostEngage();
+        try { await api("POST", `/api/forums/posts/${p.id}/like`); }
+        catch (e) {
+          ({ hasLiked, hasDisliked, likeCount, dislikeCount } = snapshot);
+          renderPostEngage();
+          toast(e.detail, true);
+        }
       };
 
       post.querySelector(`#dislike-${p.id}`).onclick = async () => {
-        try { await api("POST", `/api/forums/posts/${p.id}/dislike`); navigate("thread", id); }
-        catch (e) { toast(e.detail, true); }
+        const snapshot = { hasLiked, hasDisliked, likeCount, dislikeCount };
+        if (!hasDisliked) dislikeCount++;
+        if (hasLiked) likeCount--;
+        hasDisliked = true;
+        hasLiked = false;
+        renderPostEngage();
+        try { await api("POST", `/api/forums/posts/${p.id}/dislike`); }
+        catch (e) {
+          ({ hasLiked, hasDisliked, likeCount, dislikeCount } = snapshot);
+          renderPostEngage();
+          toast(e.detail, true);
+        }
       };
     }
 
     if (canDel) {
       const d = el('<button class="btn danger sm" style="margin-top:10px">Delete</button>');
-      d.onclick = async () => { try { await api("DELETE", `/api/forums/posts/${p.id}`); toast("Post deleted"); navigate("thread", id); } catch (e) { toast(e.detail, true); } };
+      d.onclick = async () => {
+        try {
+          await api("DELETE", `/api/forums/posts/${p.id}`);
+          toast("Post deleted");
+          const bodyEl = post.querySelector(`#post-body-${p.id}`);
+          if (bodyEl) bodyEl.innerHTML = '<em class="muted">[deleted]</em>';
+          const mediaEl = post.querySelector(`#post-media-${p.id}`);
+          if (mediaEl) mediaEl.remove();
+          const engageEl = post.querySelector(`#engage-${p.id}`);
+          if (engageEl) engageEl.remove();
+          d.remove();
+        } catch (e) { toast(e.detail, true); }
+      };
       post.appendChild(d);
     }
-    stack.appendChild(post);
+
+    return post;
+  }
+
+  const stack = el('<div class="stack"></div>');
+  for (const p of detail.posts) {
+    stack.appendChild(renderPost(p));
   }
   v.appendChild(stack);
 
@@ -952,8 +1036,13 @@ async function viewThread(v, id) {
 
       if (!body && !rpMedia.length) { toast("Write something or attach a file first.", true); return; }
       try {
-        await api("POST", `/api/forums/threads/${id}/posts`, { body, is_anonymous, media_urls: rpMedia.map(m => m.url) });
-        navigate("thread", id);
+        const newPost = await api("POST", `/api/forums/threads/${id}/posts`, { body, is_anonymous, media_urls: rpMedia.map(m => m.url) });
+        stack.appendChild(renderPost(newPost));
+        reply.querySelector("#rp-body").value = "";
+        reply.querySelector("#rp-anon").checked = false;
+        rpMedia.length = 0;
+        renderRpMediaPreview();
+        toast("Reply posted");
       }
       catch (e) { toast(e.detail, true); }
     };
