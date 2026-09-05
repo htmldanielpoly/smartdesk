@@ -99,10 +99,42 @@ function mediaPreviewHtml(urls) {
   if (!urls || !urls.length) return "";
   return `<div class="media-preview" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
     ${urls.map(u => u.match(/\.(mp4|webm)$/i)
-      ? `<video src="${u}" controls style="max-width:200px;max-height:200px;border-radius:8px"></video>`
-      : `<img src="${u}" style="max-width:200px;max-height:200px;border-radius:8px;object-fit:cover" />`
+      ? `<video data-media-src="${u}" controls style="max-width:200px;max-height:200px;border-radius:8px"></video>`
+      : `<img data-media-src="${u}" style="max-width:200px;max-height:200px;border-radius:8px;object-fit:cover" />`
     ).join("")}
   </div>`;
+}
+
+/* Media requires auth (GET /api/forums/media/...), so a plain src="" can
+   never load it — the browser can't attach the Authorization header. Markup
+   above ships with data-media-src instead; hydrateMedia() fetches each one
+   with auth, turns it into a blob: URL, and only then sets it as the real
+   src. Call this once on the container right after inserting it into the
+   document. */
+let activeBlobUrls = [];
+
+async function loadAuthenticatedMedia(el) {
+  const url = el.dataset.mediaSrc;
+  delete el.dataset.mediaSrc;
+  try {
+    const headers = {};
+    if (state.token) headers.Authorization = `Bearer ${state.token}`;
+    const resp = await fetch(url, { headers });
+    if (!resp.ok) throw new Error(`status ${resp.status}`);
+    const blobUrl = URL.createObjectURL(await resp.blob());
+    activeBlobUrls.push(blobUrl);
+    el.src = blobUrl;
+  } catch {
+    const placeholder = el.ownerDocument.createElement("div");
+    placeholder.className = "muted";
+    placeholder.style.cssText = "max-width:200px;padding:10px;border:1px dashed var(--border);border-radius:8px;text-align:center;font-size:12px";
+    placeholder.textContent = "🖼️ Image unavailable";
+    el.replaceWith(placeholder);
+  }
+}
+
+function hydrateMedia(container) {
+  container.querySelectorAll("[data-media-src]").forEach(loadAuthenticatedMedia);
 }
 
 function composerMediaPreviewHtml(items) {
@@ -114,8 +146,8 @@ function composerMediaPreviewHtml(items) {
       <div style="display:flex;flex-direction:column;align-items:center;max-width:200px">
         <div style="position:relative;display:inline-block">
           ${item.url.match(/\.(mp4|webm)$/i)
-            ? `<video src="${item.url}" controls style="max-width:200px;max-height:200px;border-radius:8px"></video>`
-            : `<img src="${item.url}" style="max-width:200px;max-height:200px;border-radius:8px;object-fit:cover" />`
+            ? `<video data-media-src="${item.url}" controls style="max-width:200px;max-height:200px;border-radius:8px"></video>`
+            : `<img data-media-src="${item.url}" style="max-width:200px;max-height:200px;border-radius:8px;object-fit:cover" />`
           }
           <button type="button" class="media-remove-btn" data-idx="${i}" style="
             position:absolute; top:4px; right:4px;
@@ -236,6 +268,10 @@ function navigate(view, arg) {
   const titles = { tickets: isStaff() ? "Tickets" : "My Tickets", queue: "Ticket Queue", incidents: "Incident Overview", forums: "Forums", admin: "User Management" };
   $("#page-title").textContent = titles[view] || "SmartDesk";
   const v = $("#view");
+  // The view we're leaving may hold blob: URLs from hydrateMedia() — free them
+  // now that its DOM (and the img/video elements using them) is about to go away.
+  activeBlobUrls.forEach((u) => URL.revokeObjectURL(u));
+  activeBlobUrls = [];
   v.innerHTML = '<div class="spinner"></div>';
   ({ tickets: viewTickets, ticket: viewTicket, newTicket: viewNewTicket,
    queue: viewQueue, incidents: viewIncidents, forums: viewForums, board: viewBoard,
@@ -763,6 +799,7 @@ function openThreadComposer(v, slug) {
   function renderThMediaPreview() {
     const box = modal.querySelector("#th-media-preview");
     box.innerHTML = composerMediaPreviewHtml(thMedia.map(m => ({ url: `/api/forums${m.url}`, name: m.name })));
+    hydrateMedia(box);
     box.querySelectorAll(".media-remove-btn").forEach(btn => {
       btn.onclick = () => {
         thMedia.splice(Number(btn.dataset.idx), 1);
@@ -992,6 +1029,7 @@ async function viewThread(v, id) {
       post.appendChild(d);
     }
 
+    hydrateMedia(post);
     return post;
   }
 
@@ -1054,6 +1092,7 @@ async function viewThread(v, id) {
     function renderRpMediaPreview() {
       const box = reply.querySelector("#rp-media-preview");
       box.innerHTML = composerMediaPreviewHtml(rpMedia.map(m => ({ url: `/api/forums${m.url}`, name: m.name })));
+      hydrateMedia(box);
       box.querySelectorAll(".media-remove-btn").forEach(btn => {
         btn.onclick = () => {
           rpMedia.splice(Number(btn.dataset.idx), 1);
@@ -1091,7 +1130,12 @@ async function viewThread(v, id) {
       if (!body && !rpMedia.length) { toast("Write something or attach a file first.", true); return; }
       try {
         const newPost = await api("POST", `/api/forums/threads/${id}/posts`, { body, is_anonymous, media_urls: rpMedia.map(m => m.url) });
-        stack.appendChild(renderPost(newPost));
+        // The WS new_post broadcast for this same post can arrive and get
+        // rendered by threadLiveAdd before this response resolves — skip the
+        // local append if that already happened, same guard threadLiveAdd uses.
+        if (!document.getElementById(`post-${newPost.id}`)) {
+          stack.appendChild(renderPost(newPost));
+        }
         reply.querySelector("#rp-body").value = "";
         reply.querySelector("#rp-anon").checked = false;
         rpMedia.length = 0;
@@ -1209,6 +1253,7 @@ async function viewMessages(v, activeUserId = null) {
   function renderDmMediaPreview() {
     const box = layout.querySelector("#dm-media-preview");
     box.innerHTML = composerMediaPreviewHtml(dmMedia.map(m => ({ url: `/api/forums${m.url}`, name: m.name })));
+    hydrateMedia(box);
     box.querySelectorAll(".media-remove-btn").forEach(btn => {
       btn.onclick = () => {
         dmMedia.splice(Number(btn.dataset.idx), 1);
@@ -1278,6 +1323,7 @@ async function viewMessages(v, activeUserId = null) {
             </div>
           `));
         }
+        hydrateMedia(historyBox);
         historyBox.scrollTop = historyBox.scrollHeight; // Auto-scroll to latest message
       }
 
@@ -1287,13 +1333,15 @@ async function viewMessages(v, activeUserId = null) {
           const media_urls = dmMedia.map(m => m.url);
           await api("POST", `/api/forums/messages`, { recipient_id: activeUserId, content, media_urls });
           layout.querySelector("#chat-input").value = "";
-          historyBox.appendChild(el(`
+          const bubble = el(`
             <div class="chat-bubble me">
               <div class="text">${esc(content)}</div>
               ${media_urls.length ? mediaPreviewHtml(media_urls.map(u => `/api/forums${u}`)) : ""}
               <div class="time">just now</div>
             </div>
-            `));
+            `);
+          historyBox.appendChild(bubble);
+          hydrateMedia(bubble);
           historyBox.scrollTop = historyBox.scrollHeight;
           dmMedia.length = 0;
           renderDmMediaPreview();
@@ -1345,13 +1393,15 @@ function connectWebSocket() {
           if (currentView === "messages" && historyBox && String(window.currentChatId) === String(dm.sender_id)) {
             const emptyPlaceholder = historyBox.querySelector(".empty");
             if (emptyPlaceholder) emptyPlaceholder.remove();
-            historyBox.appendChild(el(`
+            const bubble = el(`
               <div class="chat-bubble them">
                 <div class="text">${esc(dm.content)}</div>
                 ${dm.media_urls && dm.media_urls.length ? mediaPreviewHtml(dm.media_urls.map(u => `/api/forums${u}`)) : ""}
                 <div class="time">just now</div>
               </div>
-            `));
+            `);
+            historyBox.appendChild(bubble);
+            hydrateMedia(bubble);
             historyBox.scrollTop = historyBox.scrollHeight;
           } else if (dm.sender_id) {
             toast(`📩 New message from ${nameForUserId(dm.sender_id)}`);
