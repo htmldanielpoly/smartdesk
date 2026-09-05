@@ -32,7 +32,10 @@ class ConnectionManager:
         if user_id in self.active_connections:
             payload = json.dumps(message, default=str)
             dead: list[WebSocket] = []
-            for connection in self.active_connections[user_id]:
+            # Iterate a copy: a concurrent connect()/disconnect() for this
+            # same user (e.g. another tab) could otherwise mutate this list
+            # mid-iteration and silently skip a still-live connection.
+            for connection in list(self.active_connections[user_id]):
                 try:
                     await connection.send_text(payload)
                 except Exception:
@@ -48,7 +51,9 @@ class ConnectionManager:
         payload = json.dumps(message, default=str)
         for user_id, connections in list(self.active_connections.items()):
             dead: list[WebSocket] = []
-            for connection in connections:
+            # Iterate a copy of this user's connection list, not the live
+            # reference — see the same note in send_personal_message().
+            for connection in list(connections):
                 try:
                     await connection.send_text(payload)
                 except Exception:

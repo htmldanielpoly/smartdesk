@@ -22,6 +22,7 @@ _WINDOW_SECONDS = 60
 _MAX_REQUESTS = 30          # general endpoints
 _MAX_POSTS = 10             # posting/replying (stricter)
 _MAX_MESSAGES = 20          # DMs
+_MAX_LIKES = 30             # like/dislike toggles
 
 _hits: dict[str, deque[float]] = defaultdict(deque)
 
@@ -52,6 +53,11 @@ async def rate_limit_post(user: dict = Depends(get_current_user)) -> None:
 async def rate_limit_message(user: dict = Depends(get_current_user)) -> None:
     """Rate limit for direct messages — 20/60s per user."""
     _check(f"msg:{user['id']}", _MAX_MESSAGES)
+
+
+async def rate_limit_like(user: dict = Depends(get_current_user)) -> None:
+    """Rate limit for like/dislike toggles — 30/60s per user."""
+    _check(f"like:{user['id']}", _MAX_LIKES)
 
 
 def reset() -> None:

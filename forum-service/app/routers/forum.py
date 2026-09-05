@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status,WebSocket, WebSocketDisconnect
-from app.rate_limit import rate_limit, rate_limit_post, rate_limit_message
+from app.rate_limit import rate_limit, rate_limit_post, rate_limit_message, rate_limit_like
 
 from app.config import settings
 from app.database import get_db
@@ -262,15 +262,20 @@ async def delete_post(post_id: str, user: dict = Depends(get_current_user)):
 # --- NEW: Engagement Endpoints ---
 
 @router.post("/threads/{thread_id}/like", status_code=status.HTTP_200_OK)
-async def like_thread(thread_id: str, user: dict = Depends(get_current_user)):
+async def like_thread(
+        thread_id: str,
+        user: dict = Depends(get_current_user),
+        _: None = Depends(rate_limit_like),
+):
     thread = await _get_thread_or_404(thread_id)
-    await get_db().threads.update_one(
+    result = await get_db().threads.update_one(
         {"_id": thread["_id"]},
         {"$addToSet": {"likes": user["id"]}, "$pull": {"dislikes": user["id"]}}
     )
-    # Notify thread owner if someone else liked it
+    # Notify thread owner only if this call actually changed the like state —
+    # repeat likes from the same user are otherwise a no-op that shouldn't spam.
     owner_id = thread.get("authorId")
-    if owner_id and owner_id != user["id"]:
+    if result.modified_count and owner_id and owner_id != user["id"]:
         await manager.send_personal_message({
             "type": "like_notification",
             "data": {
@@ -285,14 +290,18 @@ async def like_thread(thread_id: str, user: dict = Depends(get_current_user)):
 
 
 @router.post("/threads/{thread_id}/dislike", status_code=status.HTTP_200_OK)
-async def dislike_thread(thread_id: str, user: dict = Depends(get_current_user)):
+async def dislike_thread(
+        thread_id: str,
+        user: dict = Depends(get_current_user),
+        _: None = Depends(rate_limit_like),
+):
     thread = await _get_thread_or_404(thread_id)
-    await get_db().threads.update_one(
+    result = await get_db().threads.update_one(
         {"_id": thread["_id"]},
         {"$addToSet": {"dislikes": user["id"]}, "$pull": {"likes": user["id"]}}
     )
     owner_id = thread.get("authorId")
-    if owner_id and owner_id != user["id"] :
+    if result.modified_count and owner_id and owner_id != user["id"]:
         await manager.send_personal_message({
             "type": "like_notification",
             "data": {
@@ -307,14 +316,18 @@ async def dislike_thread(thread_id: str, user: dict = Depends(get_current_user))
 
 
 @router.post("/posts/{post_id}/like", status_code=status.HTTP_200_OK)
-async def like_post(post_id: str, user: dict = Depends(get_current_user)):
+async def like_post(
+        post_id: str,
+        user: dict = Depends(get_current_user),
+        _: None = Depends(rate_limit_like),
+):
     post = await _get_post_or_404(post_id)
-    await get_db().posts.update_one(
+    result = await get_db().posts.update_one(
         {"_id": post["_id"]},
         {"$addToSet": {"likes": user["id"]}, "$pull": {"dislikes": user["id"]}}
     )
     owner_id = post.get("authorId")
-    if owner_id and owner_id != user["id"] :
+    if result.modified_count and owner_id and owner_id != user["id"]:
         await manager.send_personal_message({
             "type": "like_notification",
             "data": {
@@ -328,14 +341,18 @@ async def like_post(post_id: str, user: dict = Depends(get_current_user)):
 
 
 @router.post("/posts/{post_id}/dislike", status_code=status.HTTP_200_OK)
-async def dislike_post(post_id: str, user: dict = Depends(get_current_user)):
+async def dislike_post(
+        post_id: str,
+        user: dict = Depends(get_current_user),
+        _: None = Depends(rate_limit_like),
+):
     post = await _get_post_or_404(post_id)
-    await get_db().posts.update_one(
+    result = await get_db().posts.update_one(
         {"_id": post["_id"]},
         {"$addToSet": {"dislikes": user["id"]}, "$pull": {"likes": user["id"]}}
     )
     owner_id = post.get("authorId")
-    if owner_id and owner_id != user["id"] :
+    if result.modified_count and owner_id and owner_id != user["id"]:
         await manager.send_personal_message({
             "type": "like_notification",
             "data": {
@@ -501,14 +518,28 @@ async def upload_media(
 
 
 @router.get("/media/{filename}")
-async def serve_media(filename: str):
-    """Serve an uploaded media file."""
+async def serve_media(filename: str, user: dict = Depends(get_current_user)):
+    """Serve an uploaded media file.
+
+    Any authenticated user may view media attached to public forum content
+    (posts/threads). But if this exact filename is attached to a direct
+    message, only that DM's sender/recipient may view it — otherwise a
+    private attachment would be readable by anyone who learns the URL.
+    Filenames are random UUIDs, so in practice a given filename is never
+    attached to both a DM and public content.
+    """
     # Prevent path traversal attacks
     if "/" in filename or "\\" in filename or ".." in filename:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid filename")
     path = os.path.join(UPLOAD_DIR, filename)
     if not os.path.exists(path):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    media_url = f"/media/{filename}"
+    dm = await get_db().direct_messages.find_one({"media_urls": media_url})
+    if dm is not None and user["id"] not in (dm["sender_id"], dm["recipient_id"]):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
     return FileResponse(path)
 
 

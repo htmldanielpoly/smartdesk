@@ -1,5 +1,11 @@
 from datetime import datetime
+from typing import Annotated
 from pydantic import BaseModel, Field
+
+# A single media URL: a path like "/media/<uuid>.png", never free-form text.
+MediaUrl = Annotated[str, Field(max_length=500)]
+# Cap on how many attachments one post/thread/message can carry.
+MAX_MEDIA_URLS = 10
 
 class BoardOut(BaseModel):
     slug: str
@@ -10,7 +16,7 @@ class BoardOut(BaseModel):
 class ThreadCreate(BaseModel):
     title: str = Field(min_length=1, max_length=160)
     body: str = Field(min_length=1, max_length=5000)
-    media_urls: list[str] = Field(default_factory=list)
+    media_urls: list[MediaUrl] = Field(default_factory=list, max_length=MAX_MEDIA_URLS)
     is_anonymous: bool = Field(default=False)
 
 class ThreadModerate(BaseModel):
@@ -44,7 +50,7 @@ class ThreadPage(BaseModel):
 
 class PostCreate(BaseModel):
     body: str = Field(default="", max_length=5000)
-    media_urls: list[str] = Field(default_factory=list)
+    media_urls: list[MediaUrl] = Field(default_factory=list, max_length=MAX_MEDIA_URLS)
     is_anonymous: bool = Field(default=False)
 
 class PostOut(BaseModel):
@@ -70,7 +76,7 @@ class ThreadDetail(BaseModel):
 class DirectMessageCreate(BaseModel):
     recipient_id: str
     content: str = Field(default="", max_length=2000)
-    media_urls: list[str] = Field(default_factory=list)
+    media_urls: list[MediaUrl] = Field(default_factory=list, max_length=MAX_MEDIA_URLS)
 
 class DirectMessageOut(BaseModel):
     id: str
